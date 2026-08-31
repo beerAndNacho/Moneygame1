@@ -132,11 +132,11 @@ export const SPECIES = [
 
 export const BOAT_UPGRADES = [
   { id:'winch', name:'전동 윈치', icon:'⚙', maxLevel:3, costs:[0,2400,7200,16800], effects:['수동 회수','회수력 +9%','회수력 +18%','회수력 +30%'] },
-  { id:'rack', name:'통발 거치대', icon:'▥', maxLevel:3, costs:[0,3500,12000,26000], effects:['슬롯 1개','슬롯 1개','슬롯 2개','슬롯 3개'] },
+  { id:'rack', name:'통발 거치대', icon:'▥', maxLevel:3, costs:[0,0,3500,12000], effects:['슬롯 1개','슬롯 1개','슬롯 2개','슬롯 3개'] },
   { id:'sonar', name:'어군 탐지기', icon:'⌁', maxLevel:3, costs:[0,3800,9800,21000], effects:['예측 없음','어종 분류 예측','희귀도 예측','정밀 포획 예측'] },
   { id:'cooler', name:'냉장 보관함', icon:'▣', maxLevel:3, costs:[0,2200,6800,15400], effects:['보관 8칸','보관 14칸','보관 20칸','보관 28칸'] },
   { id:'hull', name:'선체 보강', icon:'◇', maxLevel:3, costs:[0,3000,8400,19000], effects:['기본 선체','위험 피해 -10%','위험 피해 -20%','위험 피해 -32%'] },
-  { id:'engine', name:'선외기 엔진', icon:'➤', maxLevel:3, costs:[0,4200,12800,29000], effects:['연안 해역','연안 해역','푸른 수로','외해 침몰선'] },
+  { id:'engine', name:'선외기 엔진', icon:'➤', maxLevel:3, costs:[0,0,4200,12800], effects:['연안 해역','연안 해역','푸른 수로','외해 침몰선'] },
 ];
 
 export const NPCS = [
