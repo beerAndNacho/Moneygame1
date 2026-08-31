@@ -1,0 +1,212 @@
+    session.tension = clamp(session.tension + 19 / (1 + (state.gear.rope - 1) * 0.12), 0, 100);
+    session.stability = clamp(session.stability - 12, 0, 100);
+    setEvent('물살이 센 순간에 당겼어요! 줄 장력이 크게 올랐습니다.', 'warning');
+    sound('miss');
+    haptic([80, 40, 80]);
+    updateFishingHud();
+    checkSessionFailure();
+    return;
+  }
+
+  const rating = calculatePullRating(session.cursor, session.targetCenter, session.targetWidth);
+  session.rounds += 1;
+  let lift = 0;
+
+  if (rating === 'perfect') {
+    lift = 1.25 + state.gear.trap * 0.08;
+    session.perfect += 1;
+    session.combo += 1;
+    session.tension = clamp(session.tension - 9, 0, 100);
+    session.stability = clamp(session.stability + 3, 0, 100);
+    setEvent(session.combo >= 3 ? `PERFECT · ${session.combo}연속 당김!` : 'PERFECT · 통발이 매끄럽게 올라옵니다.', 'success');
+    sound('perfect');
+    haptic(24);
+  } else if (rating === 'good') {
+    lift = 0.82 + state.gear.trap * 0.055;
+    session.good += 1;
+    session.combo += 1;
+    session.tension = clamp(session.tension + 4 / (1 + (state.gear.rope - 1) * 0.12), 0, 100);
+    setEvent('GOOD · 리듬을 유지하세요.');
+    sound('good');
+    haptic(38);
+  } else {
+    lift = 0.28;
+    session.miss += 1;
+    session.combo = 0;
+    session.tension = clamp(session.tension + 23 / (1 + (state.gear.rope - 1) * 0.12), 0, 100);
+    session.stability = clamp(session.stability - 14 / (1 + (state.gear.trap - 1) * 0.08), 0, 100);
+    setEvent('MISS · 너무 급하게 당겨 통발이 흔들렸습니다.', 'warning');
+    sound('miss');
+    haptic([65, 30, 65]);
+  }
+
+  session.bestCombo = Math.max(session.bestCombo, session.combo);
+  session.depth = clamp(session.depth - lift, 0, session.maxDepth);
+  session.targetCenter = 0.22 + Math.random() * 0.56;
+  session.targetWidth = clamp(session.targetWidth + (Math.random() - 0.5) * 0.018, 0.125, 0.225);
+  session.cursorDirection *= Math.random() > 0.55 ? -1 : 1;
+
+  if (session.depth <= 0.03) {
+    session.depth = 0;
+    completeFishing(true);
+    return;
+  }
+
+  if (session.rounds >= 2 && Math.random() < 0.19) {
+    session.hazard = Math.random() < 0.7 ? 'current' : 'shadow';
+    session.hazardUntil = now + 850 + Math.random() * 420;
+    setEvent(session.hazard === 'current' ? '거센 물살! 잠시 버튼에서 손을 떼세요.' : '큰 그림자가 접근 중… 지금은 당기지 마세요.', 'warning');
+  }
+
+  updateFishingHud();
+  checkSessionFailure();
+}
+
+function checkSessionFailure() {
+  if (!session) return;
+  if (session.tension >= 99.5) {
+    completeFishing(false, '밧줄이 버티지 못하고 통발을 놓쳤어요.');
+  } else if (session.stability <= 0.5) {
+    completeFishing(false, '통발 문이 열려 어획물이 빠져나갔어요.');
+  }
+}
+
+function completeFishing(success, failureMessage = '') {
+  if (!session || session.phase === 'complete') return;
+  session.phase = 'complete';
+  session.dropping = false;
+  const total = Math.max(1, session.rounds);
+  const performanceScore = clamp((session.perfect + session.good * 0.64 + session.miss * 0.12) / total, 0.08, 1);
+  const catches = success
+    ? generateCatch({
+      depth: session.maxDepth,
+      baitId: session.bait.id,
+      performance: performanceScore,
+      trapLevel: state.gear.trap,
+      lampLevel: state.gear.lamp,
+      locationId: session.location.id,
+    })
+    : [];
+
+  let newCount = 0;
+  const quest = getDailyQuest(state.day);
+  for (const item of catches) {
+    const existing = state.codex[item.speciesId] || { count: 0, isNew: false };
+    if (existing.count === 0) newCount += 1;
+    state.codex[item.speciesId] = {
+      count: existing.count + 1,
+      isNew: existing.count === 0 || existing.isNew,
+    };
+    const record = state.records[item.speciesId] || { maxLength: 0, maxWeight: 0, maxValue: 0, count: 0 };
+    state.records[item.speciesId] = {
+      maxLength: Math.max(record.maxLength, item.length),
+      maxWeight: Math.max(record.maxWeight, item.weight),
+      maxValue: Math.max(record.maxValue, item.value),
+      count: record.count + 1,
+    };
+    if (item.speciesId === quest.speciesId && !state.quest.claimed) state.quest.progress += 1;
+  }
+
+  state.inventory.push(...catches);
+  const rarityXp = catches.reduce((sum, item) => sum + ({ common: 4, uncommon: 10, rare: 24, epic: 46, legendary: 90 }[item.rarity] || 4), 0);
+  const xpGain = success ? Math.round(35 + performanceScore * 55 + rarityXp + newCount * 18) : 8;
+  const beforeLevel = currentLevel();
+  state.xp += xpGain;
+  advanceTime(65 + session.maxDepth * 4);
+  saveState();
+  renderAll();
+  updateFishingHud();
+
+  const afterLevel = currentLevel();
+  const totalValue = catches.reduce((sum, item) => sum + item.value, 0);
+  dom.resultKicker.textContent = success ? (newCount > 0 ? '새로운 발견' : '완전 포획') : '조업 실패';
+  dom.resultTitle.textContent = success ? '통발이 수면 위로 올라왔어요!' : '이번 통발은 비어 돌아왔어요.';
+  dom.resultSummary.textContent = success
+    ? `${catches.length}마리를 포획했습니다.${newCount ? ` 도감에 ${newCount}종이 새로 기록됐어요.` : ''}${afterLevel > beforeLevel ? ` 선장 Lv.${afterLevel} 달성!` : ''}`
+    : failureMessage;
+  dom.resultPerfect.textContent = `${session.perfect}회`;
+  dom.resultXp.textContent = `+${xpGain} XP`;
+  dom.resultValue.textContent = formatWon(totalValue);
+
+  dom.resultCatchList.innerHTML = catches.length
+    ? catches.map((item) => {
+      const species = speciesById(item.speciesId);
+      const isNew = state.codex[item.speciesId]?.count === 1;
+      return `<article class="result-catch" style="${rarityStyle(item.rarity)};--species-color:${species.color}">
+        <div class="species-art">${speciesIconSvg(species)}</div>
+        <small>${isNew ? 'NEW · ' : ''}${RARITY_META[item.rarity].label}</small>
+        <strong>${item.name}</strong>
+        <p>${item.length.toFixed(1)}cm · ${item.weight.toFixed(2)}kg</p>
+        <b>${formatWon(item.value)}</b>
+      </article>`;
+    }).join('')
+    : `<div class="empty-state" style="min-width:100%;min-height:148px"><span class="empty-trap"></span><strong>포획물이 없습니다.</strong><p>밧줄을 강화하면 실수 부담을 줄일 수 있어요.</p></div>`;
+
+  window.setTimeout(() => {
+    openModal(dom.resultModal);
+    sound(success ? 'coin' : 'miss');
+  }, 550);
+}
+
+function refundEarlyTrip() {
+  if (!session || session.refunded) return;
+  state.energy = clamp(state.energy + session.location.energy, 0, 100);
+  state.bait[session.bait.id] += 1;
+  session.refunded = true;
+  saveState();
+}
+
+function leaveFishing() {
+  if (!session) {
+    showScreen('home');
+    return;
+  }
+  if (session.phase === 'drop-ready' || session.phase === 'dropping') {
+    refundEarlyTrip();
+    renderAll();
+    showToast('출항을 취소해 체력과 미끼를 돌려받았습니다.');
+  } else if (session.phase !== 'complete') {
+    showToast('조업을 중단했습니다. 사용한 미끼와 체력은 돌아오지 않습니다.');
+  }
+  session = null;
+  showScreen('home');
+}
+
+function updateFishingHud() {
+  if (!session) return;
+  dom.depthLabel.textContent = session.depth.toFixed(1);
+  dom.stabilityBar.style.width = `${session.stability}%`;
+  dom.stabilityLabel.textContent = `${Math.round(session.stability)}%`;
+  dom.tensionBar.style.width = `${session.tension}%`;
+  dom.tensionLabel.textContent = `${Math.round(session.tension)}%`;
+  dom.comboLabel.textContent = `COMBO ${session.combo}`;
+  dom.timingPanel.classList.toggle('is-hidden', session.phase !== 'retrieve');
+  dom.fishingActionButton.classList.toggle('retrieve', session.phase === 'retrieve');
+  dom.fishingActionButton.disabled = session.phase === 'soaking' || session.phase === 'complete';
+
+  const left = (session.targetCenter - session.targetWidth / 2) * 100;
+  const perfectWidth = session.targetWidth * 0.36 * 100;
+  dom.goodZone.style.left = `${left}%`;
+  dom.goodZone.style.width = `${session.targetWidth * 100}%`;
+  dom.perfectZone.style.left = `${(session.targetCenter - session.targetWidth * 0.18) * 100}%`;
+  dom.perfectZone.style.width = `${perfectWidth}%`;
+  dom.timingCursor.style.left = `${session.cursor * 100}%`;
+
+  switch (session.phase) {
+    case 'drop-ready':
+      dom.roundLabel.textContent = '준비';
+      dom.actionLabel.textContent = '길게 눌러 통발 내리기';
+      dom.actionHint.textContent = '누르는 동안 통발이 내려갑니다';
+      break;
+    case 'dropping':
+      dom.roundLabel.textContent = '투하';
+      dom.actionLabel.textContent = '손을 떼면 수심 고정';
+      dom.actionHint.textContent = `현재 ${session.depth.toFixed(1)}m · 최대 ${session.maxDepth}m`;
+      break;
+    case 'soaking':
+      dom.roundLabel.textContent = '대기';
+      dom.actionLabel.textContent = '미끼가 퍼지는 중…';
+      dom.actionHint.textContent = '잠시만 기다리세요';
+      break;
+    case 'retrieve':
+      dom.roundLabel.textContent = `${session.rounds + 1}단계`;

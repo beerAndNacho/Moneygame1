@@ -1,0 +1,268 @@
+const STORAGE_KEY = 'below-the-waves-state-v1';
+const RARITY_COLORS = {
+  common: '#9eb0b1',
+  uncommon: '#65dcc0',
+  rare: '#67aef1',
+  epic: '#b69cff',
+  legendary: '#efbf61',
+};
+const WEATHER = [
+  { name: '잔잔한 파도', wind: 0.18, star: 1, bonus: '안정적인 회수' },
+  { name: '차가운 해풍', wind: 0.36, star: 0.72, bonus: '희귀 어종 활동' },
+  { name: '옅은 해무', wind: 0.26, star: 0.35, bonus: '바닥 생물 증가' },
+  { name: '별이 쏟아지는 밤', wind: 0.12, star: 1.25, bonus: '좋은 크기 확률' },
+];
+
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const dom = {
+  app: $('#app'),
+  topBar: $('#topBar'),
+  bottomNav: $('#bottomNav'),
+  dayLabel: $('#dayLabel'),
+  levelLabel: $('#levelLabel'),
+  moneyLabel: $('#moneyLabel'),
+  energyLabel: $('#energyLabel'),
+  weatherLabel: $('#weatherLabel'),
+  soundButton: $('#soundButton'),
+  profileButton: $('#profileButton'),
+  locationOptions: $('#locationOptions'),
+  baitOptions: $('#baitOptions'),
+  tripEnergy: $('#tripEnergy'),
+  trapSummary: $('#trapSummary'),
+  ropeSummary: $('#ropeSummary'),
+  lampSummary: $('#lampSummary'),
+  departButton: $('#departButton'),
+  departSubtitle: $('#departSubtitle'),
+  questCard: $('#questCard'),
+  questTitle: $('#questTitle'),
+  questDescription: $('#questDescription'),
+  questReward: $('#questReward'),
+  harborCanvas: $('#harborCanvas'),
+  oceanCanvas: $('#oceanCanvas'),
+  fishingLocationLabel: $('#fishingLocationLabel'),
+  depthLabel: $('#depthLabel'),
+  roundLabel: $('#roundLabel'),
+  eventBanner: $('#eventBanner'),
+  eventText: $('#eventText'),
+  stabilityBar: $('#stabilityBar'),
+  stabilityLabel: $('#stabilityLabel'),
+  tensionBar: $('#tensionBar'),
+  tensionLabel: $('#tensionLabel'),
+  timingPanel: $('#timingPanel'),
+  timingCursor: $('#timingCursor'),
+  goodZone: $('#goodZone'),
+  perfectZone: $('#perfectZone'),
+  comboLabel: $('#comboLabel'),
+  fishingActionButton: $('#fishingActionButton'),
+  actionLabel: $('#actionLabel'),
+  actionHint: $('#actionHint'),
+  leaveFishingButton: $('#leaveFishingButton'),
+  inventoryCount: $('#inventoryCount'),
+  inventoryValue: $('#inventoryValue'),
+  inventoryList: $('#inventoryList'),
+  sellAllButton: $('#sellAllButton'),
+  sortInventoryButton: $('#sortInventoryButton'),
+  marketBadge: $('#marketBadge'),
+  gearList: $('#gearList'),
+  codexCount: $('#codexCount'),
+  codexTotal: $('#codexTotal'),
+  codexPercent: $('#codexPercent'),
+  codexRing: $('#codexRing'),
+  codexGrid: $('#codexGrid'),
+  toast: $('#toast'),
+  resultModal: $('#resultModal'),
+  resultKicker: $('#resultKicker'),
+  resultTitle: $('#resultTitle'),
+  resultSummary: $('#resultSummary'),
+  resultCatchList: $('#resultCatchList'),
+  resultPerfect: $('#resultPerfect'),
+  resultXp: $('#resultXp'),
+  resultValue: $('#resultValue'),
+  returnHarborButton: $('#returnHarborButton'),
+  detailModal: $('#detailModal'),
+  detailIcon: $('#detailIcon'),
+  detailRarity: $('#detailRarity'),
+  detailName: $('#detailName'),
+  detailDescription: $('#detailDescription'),
+  detailLength: $('#detailLength'),
+  detailWeight: $('#detailWeight'),
+  detailValue: $('#detailValue'),
+  detailCount: $('#detailCount'),
+  settingsModal: $('#settingsModal'),
+  soundToggle: $('#soundToggle'),
+  hapticsToggle: $('#hapticsToggle'),
+  installButton: $('#installButton'),
+  resetButton: $('#resetButton'),
+};
+
+let state = loadState();
+let currentScreen = 'home';
+let inventorySort = 'value';
+let toastTimer = 0;
+let session = null;
+let lastFrame = performance.now();
+let audioContext = null;
+let installPrompt = null;
+let homeStars = [];
+let oceanParticles = [];
+let fishSilhouettes = [];
+
+function loadState() {
+  const base = defaultState();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw);
+    const merged = {
+      ...base,
+      ...parsed,
+      bait: { ...base.bait, ...(parsed.bait || {}) },
+      gear: { ...base.gear, ...(parsed.gear || {}) },
+      codex: parsed.codex || {},
+      records: parsed.records || {},
+      inventory: Array.isArray(parsed.inventory) ? parsed.inventory : [],
+      quest: { ...base.quest, ...(parsed.quest || {}) },
+      settings: { ...base.settings, ...(parsed.settings || {}) },
+    };
+    if (!LOCATIONS.some((item) => item.id === merged.selectedLocation)) merged.selectedLocation = 'breakwater';
+    if (!BAITS.some((item) => item.id === merged.selectedBait)) merged.selectedBait = 'squid';
+    return merged;
+  } catch (error) {
+    console.warn('Could not load save data.', error);
+    return base;
+  }
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Could not save game state.', error);
+  }
+}
+
+function currentLevel() {
+  return levelFromXp(state.xp);
+}
+
+function weather() {
+  return WEATHER[state.weatherIndex % WEATHER.length];
+}
+
+function periodLabel() {
+  const hour = Math.floor(state.minutes / 60) % 24;
+  if (hour >= 5 && hour < 10) return '아침';
+  if (hour >= 10 && hour < 17) return '낮';
+  if (hour >= 17 && hour < 21) return '저녁';
+  return '밤';
+}
+
+function timeText() {
+  const hour = Math.floor(state.minutes / 60) % 24;
+  const minute = state.minutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function ensureQuest() {
+  if (state.quest.day !== state.day) {
+    state.quest = { day: state.day, progress: 0, claimed: false };
+  }
+}
+
+function advanceTime(minutes) {
+  state.minutes += Math.round(minutes);
+  while (state.minutes >= 24 * 60) {
+    state.minutes -= 24 * 60;
+    state.day += 1;
+    state.weatherIndex = (state.weatherIndex + 1) % WEATHER.length;
+    state.energy = clamp(state.energy + 42, 0, 100);
+  }
+  ensureQuest();
+}
+
+function showToast(message, fishing = false) {
+  clearTimeout(toastTimer);
+  dom.toast.textContent = message;
+  dom.toast.classList.toggle('fishing-toast', fishing);
+  dom.toast.classList.add('show');
+  toastTimer = window.setTimeout(() => dom.toast.classList.remove('show'), 2200);
+}
+
+function openModal(element) {
+  element.classList.add('open');
+  element.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal(element) {
+  element.classList.remove('open');
+  element.setAttribute('aria-hidden', 'true');
+}
+
+function setEvent(text, tone = '') {
+  dom.eventText.textContent = text;
+  dom.eventBanner.classList.remove('warning', 'success');
+  if (tone) dom.eventBanner.classList.add(tone);
+}
+
+function ensureAudio() {
+  if (!audioContext) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioContext = new AudioContextClass();
+  }
+  if (audioContext?.state === 'suspended') audioContext.resume().catch(() => {});
+}
+
+function sound(kind = 'tap') {
+  if (!state.settings.sound) return;
+  ensureAudio();
+  if (!audioContext) return;
+
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  const now = audioContext.currentTime;
+  const config = {
+    tap: [310, 0.035, 'square', 0.025],
+    perfect: [740, 0.13, 'sine', 0.07],
+    good: [470, 0.09, 'triangle', 0.05],
+    miss: [120, 0.12, 'sawtooth', 0.04],
+    coin: [880, 0.14, 'square', 0.045],
+    upgrade: [540, 0.22, 'triangle', 0.06],
+    splash: [180, 0.18, 'sine', 0.05],
+  }[kind] || [310, 0.05, 'sine', 0.03];
+
+  oscillator.type = config[2];
+  oscillator.frequency.setValueAtTime(config[0], now);
+  if (kind === 'coin' || kind === 'upgrade' || kind === 'perfect') {
+    oscillator.frequency.exponentialRampToValueAtTime(config[0] * 1.55, now + config[1]);
+  } else if (kind === 'miss' || kind === 'splash') {
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(70, config[0] * 0.55), now + config[1]);
+  }
+  gain.gain.setValueAtTime(config[3], now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + config[1]);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start(now);
+  oscillator.stop(now + config[1] + 0.02);
+}
+
+function haptic(pattern) {
+  if (state.settings.haptics && navigator.vibrate) navigator.vibrate(pattern);
+}
+
+function speciesById(id) {
+  return SPECIES.find((species) => species.id === id);
+}
+
+function locationById(id) {
+  return LOCATIONS.find((location) => location.id === id) || LOCATIONS[0];
+}
+
+function baitById(id) {
+  return BAITS.find((bait) => bait.id === id) || BAITS[0];
+}
+
+function rarityStyle(rarity) {
+  return `--rarity-color:${RARITY_COLORS[rarity] || RARITY_COLORS.common}`;
+}
+

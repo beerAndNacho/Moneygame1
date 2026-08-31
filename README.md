@@ -51,8 +51,10 @@ npm run check
 ```text
 .
 ├── index.html            # 화면 구조와 접근성 마크업
-├── styles.css            # 모바일 UI, 픽셀 아트형 CSS 그래픽
-├── game.js               # 화면 전환, 저장, 캔버스 렌더링, 게임 루프
+├── styles.css            # 분할 스타일시트 진입점
+├── styles-part-*.css     # 모바일 UI, 픽셀 아트형 CSS 그래픽
+├── game.js               # 런타임 모듈 로더
+├── game-part-*.txt       # 화면 전환, 저장, 캔버스 렌더링, 게임 루프
 ├── game-core.js          # 생물 데이터와 순수 게임 계산 함수
 ├── tests/                # Node 내장 테스트 러너 기반 단위 테스트
 ├── service-worker.js     # 오프라인 캐시

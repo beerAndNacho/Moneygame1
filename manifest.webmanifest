@@ -1,0 +1,18 @@
+{
+  "name": "파도 아래: 통발 일지",
+  "short_name": "통발 일지",
+  "description": "통발을 내리고 타이밍에 맞춰 끌어올리는 모바일 낚시 게임",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07101b",
+  "theme_color": "#081522",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
