@@ -1,0 +1,151 @@
+    case 'select-location': store.setSelection('location', id); renderSetup(); toast(`${getLocation(id).name} 선택`, 'success'); break;
+    case 'select-trap': {
+      if (store.canUseTrap(id)) { store.setSelection('trap', id); if (currentView === 'setup') renderSetup(); else renderVillage(); toast(`${getTrap(id).name} 선택`, 'success'); }
+      else toast('사용할 수 없는 통발입니다.', 'error');
+      break;
+    }
+    case 'select-bait': if ((store.state.baits[id] ?? 0) > 0) { store.setSelection('bait', id); renderSetup(); toast(`${getBait(id).name} 선택`, 'success'); } break;
+    case 'start-placement': startPlacement(); break;
+    case 'abort-deploy': route('harbor'); break;
+    case 'resolve-deploy': resolvePlacement(); break;
+    case 'go-trapline': closeModal(); route('trapline'); break;
+    case 'start-retrieve': startRetrieval(id); break;
+    case 'confirm-tutorial': store.updateSetting('tutorialSeen', true); startRetrieval(id, true); break;
+    case 'abort-retrieve': abortRetrievalConfirm(); break;
+    case 'resume-retrieve': closeModal(); break;
+    case 'leave-retrieve': runtime = null; closeModal(); route('trapline'); break;
+    case 'result-home': runtime = null; closeModal(); route('harbor'); break;
+    case 'result-market': runtime = null; closeModal(); route('market'); break;
+    case 'sell-item': {
+      const result = store.sellCatch(id, button.dataset.channel);
+      if (result.ok) { sound.play('coin'); toast(`${formatCoins(result.coins)}조개에 판매했습니다.`, 'success'); renderMarket(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'sell-all-best': {
+      const channel = chooseBestBulkChannel();
+      const result = store.sellAll(channel);
+      if (result.ok) { sound.play('coin'); toast(`${channel === 'city' ? '도시 경매' : '섬 직거래'}로 ${formatCoins(result.coins)}조개 획득`, 'success'); renderMarket(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'buy-bait': {
+      const result = store.buyBait(id, 3);
+      if (result.ok) { sound.play('coin'); toast(`${getBait(id).name} 3개를 구입했습니다.`, 'success'); renderCurrentView(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'buy-trap': {
+      const result = store.buyTrap(id);
+      if (result.ok) { sound.play('coin'); toast(`${getTrap(id).name} 구입 완료`, 'success'); renderVillage(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'repair-trap': {
+      const result = store.repairTrap(id);
+      if (result.ok) { sound.play('coin'); toast(`수리 완료 · ${formatCoins(result.cost)}조개`, 'success'); renderVillage(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'upgrade-boat': {
+      const result = store.upgradeBoat(id);
+      if (result.ok) { sound.play('coin'); vibrate([30,20,60]); toast(`${getUpgrade(id).name} LV.${result.level} 강화 완료`, 'success'); renderVillage(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'claim-quest': {
+      const result = store.claimQuest(id);
+      if (result.ok) { sound.play('coin'); toast(`보상 ${formatCoins(result.coins)}조개 획득`, 'success'); renderVillage(); }
+      else toast(result.reason, 'error');
+      break;
+    }
+    case 'advance-day': {
+      if (store.state.activeTraps.length) { toast('설치된 통발을 먼저 회수하세요.', 'error'); break; }
+      store.advanceDay(); toast(`${store.state.profile.day}일차 조업이 시작됐습니다.`, 'success'); renderVillage(); break;
+    }
+    case 'request-notification': await requestNotificationPermission(); renderVillage(); break;
+    case 'install-app': if (deferredInstallPrompt) { deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; renderVillage(); } break;
+    case 'species-detail': showSpeciesDetail(id); break;
+    default: break;
+  }
+}
+
+app.addEventListener('click', (event) => handleAction(event.target));
+modalRoot.addEventListener('click', (event) => handleAction(event.target));
+
+app.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('[data-action="hold-pull"]')) { event.preventDefault(); setHolding(true); }
+});
+for (const type of ['pointerup','pointercancel','pointerleave']) {
+  app.addEventListener(type, (event) => {
+    if (runtime?.type === 'retrieve' && runtime.holding) { event.preventDefault(); setHolding(false); }
+  });
+}
+
+addEventListener('keydown', (event) => {
+  if (event.code === 'Space' && runtime?.type === 'retrieve') { event.preventDefault(); if (!event.repeat) setHolding(true); }
+  if (event.code === 'Escape') {
+    if (runtime?.type === 'retrieve') abortRetrievalConfirm();
+    else if (runtime?.type === 'deploy') route('harbor');
+    else closeModal();
+  }
+});
+addEventListener('keyup', (event) => { if (event.code === 'Space' && runtime?.type === 'retrieve') { event.preventDefault(); setHolding(false); } });
+
+modalRoot.addEventListener('change', (event) => {
+  const input = event.target.closest('[data-setting]');
+  if (!input) return;
+  store.updateSetting(input.dataset.setting, input.checked);
+  if (input.dataset.setting === 'reducedMotion') document.documentElement.classList.toggle('reduced-motion', input.checked);
+});
+
+store.addEventListener('change', () => {
+  document.documentElement.classList.toggle('reduced-motion', store.state.settings.reducedMotion);
+});
+
+addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); deferredInstallPrompt = event; if (currentView === 'village') renderVillage(); });
+addEventListener('appinstalled', () => { deferredInstallPrompt = null; toast('홈 화면 설치가 완료됐습니다.', 'success'); });
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    checkReadyNotifications();
+    if (!runtime && ['harbor','trapline'].includes(currentView)) renderCurrentView();
+  }
+});
+
+if (new URLSearchParams(location.search).has('qa')) {
+  globalThis.__MONEYGAME_QA__ = {
+    getState:() => structuredClone(store.state),
+    getRuntime:() => runtime ? { type:runtime.type, depth:runtime.depth, tension:runtime.tension, lock:runtime.lock, durability:runtime.durability, stage:runtime.stage, resolved:runtime.resolved } : null,
+    forceReady:(activeId) => {
+      const active = store.getActiveTrap(activeId ?? store.state.activeTraps[0]?.id);
+      if (!active) return false;
+      active.readyAt = Date.now() - 1_000;
+      active.staleAt = Date.now() + 60_000;
+      store.save();
+      if (!runtime && ['harbor','trapline'].includes(currentView)) renderCurrentView();
+      return true;
+    },
+    forceRetrievalSuccess:() => {
+      if (!runtime || runtime.type !== 'retrieve' || runtime.resolved) return false;
+      runtime.bestCombo = Math.max(runtime.bestCombo, 6);
+      runtime.perfects = Math.max(runtime.perfects, 7);
+      runtime.satisfaction = Math.max(runtime.satisfaction, 1.18);
+      runtime.score = Math.max(runtime.score, 2_400);
+      runtime.depth = 0;
+      finishRetrievalSuccess();
+      return true;
+    },
+    forcePartial:(factor = .38) => {
+      if (!runtime || runtime.type !== 'retrieve' || runtime.resolved) return false;
+      finishRetrievalPartial('QA 부분 회수', '자동 테스트를 위한 부분 성공 결과입니다.', factor);
+      return true;
+    },
+    route:(view) => route(view),
+  };
+}
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+document.documentElement.classList.toggle('reduced-motion', store.state.settings.reducedMotion);
+renderHarbor();
+requestAnimationFrame(animationLoop);

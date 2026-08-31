@@ -1,0 +1,165 @@
+    <div class="collection-grid">${SPECIES.map((species) => { const record = state.collection[species.id]; return `<button class="collection-item ${record ? `rarity-${species.rarity}` : 'unknown'}" data-action="species-detail" data-id="${species.id}" ${record ? '' : 'disabled'}><span>${record ? speciesGlyph(species) : '?'}</span><small>${record ? RARITIES[species.rarity].label : '미발견'}</small><b>${record ? html(species.name) : '???'}</b><i>${record ? `${record.count}마리` : '도감 빈칸'}</i></button>`; }).join('')}</div>`;
+  renderScreen(content, 'collection', '도감');
+}
+
+function renderUpgradeCard(upgrade) {
+  const level = store.state.boat[upgrade.id] ?? 0;
+  const maxed = level >= upgrade.maxLevel;
+  const next = level + 1;
+  const cost = maxed ? 0 : upgrade.costs[next];
+  const blocked = upgrade.id === 'rack' && store.state.activeTraps.length >= store.slotCount;
+  return `<article class="upgrade-card"><span>${icon(upgrade.id === 'sonar' ? 'sonar' : upgrade.id === 'cooler' ? 'box' : upgrade.id === 'rack' ? 'trapline' : upgrade.id === 'winch' ? 'wrench' : 'wave')}</span><div><small>LV.${level} / ${upgrade.maxLevel}</small><h3>${html(upgrade.name)}</h3><p>${html(upgrade.effects[level] ?? '')}${!maxed ? ` → ${html(upgrade.effects[next])}` : ''}</p><div class="level-dots">${Array.from({ length:upgrade.maxLevel }, (_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('')}</div></div><button data-action="upgrade-boat" data-id="${upgrade.id}" ${maxed || blocked ? 'disabled' : ''}>${maxed ? '최고 단계' : blocked ? '통발 회수 필요' : `${formatCoins(cost)} 조개`}</button></article>`;
+}
+
+function questProgressText(quest, progress) {
+  if (quest.type === 'tag' || quest.type === 'large' || quest.type === 'newSpecies' || quest.type === 'perfect' || quest.type === 'deploy' || quest.type === 'citySale') return `${progress}/${quest.target}`;
+  return `${progress}/${quest.target}`;
+}
+
+function renderVillage() {
+  const state = store.state;
+  const story = currentStoryStep();
+  const content = `<section class="page-heading"><small>ISLAND VILLAGE</small><h1>섬마을</h1><p>주민의 의뢰를 해결하고 낡은 배를 새로운 트랩라인 선박으로 바꾸세요.</p></section>
+    <section class="story-panel"><div class="story-map"><span class="map-line"></span>${STORY_STEPS.map((step, index) => `<i class="${index < state.story.stepIndex ? 'done' : index === state.story.stepIndex ? 'current' : ''}">${index < state.story.stepIndex ? '✓' : index + 1}</i>`).join('')}</div>${story ? `<div class="story-current"><small>CHAPTER 1 · 현재 목표</small><h2>${html(story.title)}</h2><p>${html(story.description)}</p></div>` : `<div class="story-current complete"><small>CHAPTER 1 COMPLETE</small><h2>옛 통발 항로 복원</h2><p>섬사람들이 다시 바다의 불빛을 따라 나섭니다.</p></div>`}</section>
+    <section class="npc-row">${NPCS.map((npc) => `<article><span style="--npc:${npc.accent}">${npc.icon}</span><div><small>${html(npc.role)}</small><b>${html(npc.name)}</b><p>${html(npc.greeting)}</p></div></article>`).join('')}</section>
+    <section class="section-block"><header class="section-heading"><div><small>DAILY REQUESTS</small><h2>오늘의 주민 의뢰</h2></div><span>${state.profile.day}일차</span></header><div class="quest-list">${state.dailyQuestIds.map((id, index) => { const quest = QUESTS.find((entry) => entry.id === id); const progress = state.quests[id] ?? { progress:0, claimed:false }; const ready = progress.progress >= quest.target && !progress.claimed; return `<article class="quest-card ${progress.claimed ? 'claimed' : ready ? 'ready' : ''}"><span>${progress.claimed ? icon('check') : String(index + 1).padStart(2, '0')}</span><div><small>${questProgressText(quest, progress.progress)}</small><h3>${html(quest.title)}</h3><p>${html(quest.description)}</p><div class="quest-progress"><i style="width:${Math.round(clamp(progress.progress / quest.target, 0, 1) * 100)}%"></i></div><em>${formatCoins(quest.rewardCoins)}조개 · 경험치 ${quest.rewardXp}</em></div><button data-action="claim-quest" data-id="${id}" ${ready ? '' : 'disabled'}>${progress.claimed ? '수령함' : ready ? '보상 받기' : '진행 중'}</button></article>`; }).join('')}</div></section>
+    <section class="section-block"><header class="section-heading"><div><small>BOAT YARD</small><h2>배 장비 강화</h2></div></header><div class="upgrade-list">${BOAT_UPGRADES.map(renderUpgradeCard).join('')}</div></section>
+    <section class="section-block"><header class="section-heading"><div><small>TRAP SHOP</small><h2>통발 정비소</h2></div></header><div class="shop-list">${TRAPS.map((trap) => { const owned = state.traps[trap.id]; const active = state.activeTraps.some((entry) => entry.trapId === trap.id); const repairCost = owned?.owned ? getRepairCost(owned.durability, trap.maxDurability) : 0; const locked = state.profile.level < trap.unlockLevel; return `<article class="shop-row trap-shop"><span>${icon('trapline')}</span><div><small>${owned?.owned ? `내구 ${Math.round(owned.durability)}/${trap.maxDurability}` : `LV.${trap.unlockLevel} 해금`}</small><b>${html(trap.name)}</b><p>${html(trap.subtitle)} · 용량 ${trap.capacity}</p></div><div>${owned?.owned ? `<button data-action="select-trap" data-id="${trap.id}" ${active ? 'disabled' : ''}>${state.selection.trapId === trap.id ? '선택됨' : active ? '설치 중' : '선택'}</button><button data-action="repair-trap" data-id="${trap.id}" ${!repairCost || active ? 'disabled' : ''}>${repairCost ? `수리 ${formatCoins(repairCost)}` : '정상'}</button>` : `<button data-action="buy-trap" data-id="${trap.id}" ${locked ? 'disabled' : ''}>${locked ? `LV.${trap.unlockLevel}` : `${formatCoins(trap.price)} 조개`}</button>`}</div></article>`; }).join('')}</div></section>
+    <section class="section-block"><header class="section-heading"><div><small>DAY & SETTINGS</small><h2>조업 관리</h2></div></header><div class="management-actions"><button data-action="advance-day" ${state.activeTraps.length ? 'disabled' : ''}>${icon('refresh')}<span><b>다음 날로</b><small>${state.activeTraps.length ? '설치된 통발을 먼저 회수하세요' : '시세·날씨·의뢰 갱신'}</small></span></button><button data-action="request-notification">${icon('bell')}<span><b>통발 준비 알림</b><small>${globalThis.Notification?.permission === 'granted' ? '알림 허용됨' : '브라우저 알림 사용'}</small></span></button>${deferredInstallPrompt ? `<button data-action="install-app">${icon('install')}<span><b>홈 화면에 설치</b><small>PWA로 전체 화면 실행</small></span></button>` : ''}</div></section>`;
+  renderScreen(content, 'village', '섬마을');
+}
+
+function renderCurrentView() {
+  if (currentView === 'trapline') renderTrapline();
+  else if (currentView === 'market') renderMarket();
+  else if (currentView === 'collection') renderCollection();
+  else if (currentView === 'village') renderVillage();
+  else if (currentView === 'setup') renderSetup();
+  else renderHarbor();
+}
+
+function showSpeciesDetail(id) {
+  const species = getSpecies(id);
+  const record = store.state.collection[id];
+  if (!species || !record) return;
+  const location = getLocation(record.locationId);
+  const trap = getTrap(record.trapId);
+  const bait = getBait(record.baitId);
+  showModal(`<div class="detail-hero rarity-${species.rarity}"><span>${speciesGlyph(species)}</span><small>${RARITIES[species.rarity].label}</small><h2>${html(species.name)}</h2><p>${html(species.quote)}</p></div><div class="detail-grid"><span><small>총 포획</small><b>${record.count}마리</b></span><span><small>최대 길이</small><b>${record.maxLength.toFixed(1)}cm</b></span><span><small>최대 무게</small><b>${formatWeight(record.maxWeight)}</b></span><span><small>최고 가치</small><b>${formatCoins(record.bestPrice)}조개</b></span></div><div class="detail-origin"><span>${icon('anchor')}</span><div><small>최근 발견 조합</small><b>${html(location?.name ?? '-')}</b><p>${html(trap?.name ?? '-')} · ${html(bait?.name ?? '-')} · 첫 발견 ${formatDate(record.firstCaughtAt)}</p></div></div>`, 'species-modal');
+}
+
+function showSettings() {
+  const state = store.state;
+  showModal(`<div class="modal-heading"><small>PROFILE & SETTINGS</small><h2>${html(state.profile.name)}</h2><p>레벨 ${state.profile.level} · 누적 ${state.profile.totalCatches}마리 · 최고 콤보 ${state.profile.bestCombo}</p></div><div class="settings-list"><label><span>${icon('wave')}<b>효과음</b></span><input type="checkbox" data-setting="sound" ${state.settings.sound ? 'checked' : ''}></label><label><span>${icon('bell')}<b>진동</b></span><input type="checkbox" data-setting="vibration" ${state.settings.vibration ? 'checked' : ''}></label><label><span>${icon('pause')}<b>모션 줄이기</b></span><input type="checkbox" data-setting="reducedMotion" ${state.settings.reducedMotion ? 'checked' : ''}></label></div><div class="profile-stats"><span><small>통발 설치</small><b>${state.profile.deployments}회</b></span><span><small>성공 회수</small><b>${state.profile.successfulRetrievals}회</b></span><span><small>PERFECT</small><b>${state.profile.perfectPulls}회</b></span><span><small>도시 출하</small><b>${state.profile.citySales}건</b></span></div><button class="danger-button" data-action="confirm-reset">저장 데이터 초기화</button>`, 'settings-modal');
+}
+
+function showResetConfirm() {
+  showModal(`<div class="modal-heading"><small>RESET DATA</small><h2>처음부터 다시 시작할까요?</h2><p>통발, 도감, 조개, 업그레이드 기록이 모두 삭제됩니다.</p></div><div class="modal-actions"><button data-action="close-modal">취소</button><button class="danger" data-action="reset-game">초기화</button></div>`, 'confirm-modal');
+}
+
+function startPlacement() {
+  const check = store.canDeploy();
+  if (!check.ok) { toast(check.reason, 'error'); return; }
+  closeModal();
+  const location = store.selectedLocation;
+  runtime = {
+    type:'deploy',
+    marker:.08,
+    direction:1,
+    speed:.58 + location.current * .15,
+    zoneCenter:clamp(.5 + Math.sin(now() * .002) * .08, .32, .68),
+    zoneWidth:clamp(.17 - location.danger * .07, .09, .17),
+    stopped:false,
+    startedAt:performance.now(),
+  };
+  currentView = 'deploy';
+  ocean.setMode('deploy', runtime);
+  app.className = 'app minigame-app';
+  app.innerHTML = `<section class="minigame deploy-game"><header class="game-header"><button data-action="abort-deploy" aria-label="설치 취소">${icon('close')}</button><div><small>TRAP DEPLOYMENT</small><h1>${html(location.name)}</h1></div><span>수심 ${location.depth}m</span></header><div class="deploy-copy"><small>해저 지형을 읽으세요</small><h2>표시선이 안정 구역에 들어올 때 통발을 놓으세요</h2><p>설치 품질은 대기 시간, 포획량, 희귀 생물 확률에 영향을 줍니다.</p></div><div class="deploy-controller"><div class="deploy-gauge"><span class="danger-zone left"></span><span class="target-zone" data-target-zone style="left:${(runtime.zoneCenter - runtime.zoneWidth) * 100}%;width:${runtime.zoneWidth * 2 * 100}%"></span><i class="gauge-marker" data-deploy-marker></i></div><div class="gauge-labels"><span>바위</span><b>안정 지점</b><span>급류</span></div><button class="drop-button" data-action="resolve-deploy"><span>${icon('anchor')}</span><div><b>지금 놓기</b><small>한 번만 눌러 설치 위치를 확정합니다</small></div></button></div></section>`;
+}
+
+function resolvePlacement() {
+  if (!runtime || runtime.type !== 'deploy' || runtime.stopped) return;
+  runtime.stopped = true;
+  const quality = judgePlacement(runtime.marker, runtime.zoneCenter, runtime.zoneWidth);
+  const result = store.deployTrap({ placementQuality:quality });
+  if (!result.ok) { toast(result.reason, 'error'); route('harbor'); return; }
+  sound.play('deploy');
+  vibrate(quality === 'perfect' ? [45,30,80] : 55);
+  const active = result.active;
+  const location = getLocation(active.locationId);
+  const copy = {
+    perfect:['완벽 설치','포획량과 희귀 생물 확률이 올라가고 대기 시간이 단축됩니다.'],
+    stable:['안정 설치','통발이 해저에 단단히 자리 잡았습니다.'],
+    unstable:['불안정 설치','회수할 때 바위 걸림과 장력 변화에 주의하세요.'],
+  }[quality];
+  runtime = null;
+  showModal(`<div class="result-emblem ${quality}">${icon('trapline')}</div><div class="modal-heading center"><small>PLACEMENT RESULT</small><h2>${copy[0]}</h2><p>${copy[1]}</p></div><div class="result-summary"><span><small>설치 해역</small><b>${html(location.name)}</b></span><span><small>회수 가능까지</small><b>${formatDuration(active.readyAt - now())}</b></span><span><small>트랩라인</small><b>${active.slot}번 슬롯</b></span></div><button class="modal-primary" data-action="go-trapline">트랩라인 확인</button>`, 'result-modal', false);
+}
+
+function askRetrievalTutorial(activeId) {
+  showModal(`<div class="tutorial-art"><span>${icon('trapline')}</span><i></i></div><div class="modal-heading center"><small>첫 회수 튜토리얼</small><h2>당기고, 위험할 때 놓으세요</h2><p>초록 구역에 표시선이 들어오면 버튼을 누르세요. 장력이 높아지거나 상어·몸부림 경고가 뜨면 즉시 손을 뗍니다.</p></div><div class="tutorial-steps"><span><b>1</b>초록 구역에서 누르기</span><span><b>2</b>장력이 높으면 손 떼기</span><span><b>3</b>수면까지 3구간 통과</span></div><button class="modal-primary" data-action="confirm-tutorial" data-id="${activeId}">회수 시작</button>`, 'tutorial-modal', false);
+}
+
+function startRetrieval(activeId, skipTutorial = false) {
+  const check = store.canRetrieve(activeId);
+  if (!check.ok) { toast(check.reason, 'error'); return; }
+  if (!skipTutorial && !store.state.settings.tutorialSeen) { askRetrievalTutorial(activeId); return; }
+  closeModal();
+  const active = check.active;
+  const location = getLocation(active.locationId);
+  const trap = getTrap(active.trapId);
+  const bait = getBait(active.baitId);
+  const trapState = store.state.traps[active.trapId];
+  const seeded = mulberry32(active.seed ^ 0x9e3779b9);
+  runtime = {
+    type:'retrieve', resolved:false, active, location, trap, bait,
+    startDepth:location.depth, depth:location.depth,
+    tension:.08, lock:100, durability:trapState.durability,
+    marker:.1, markerDirection:1, zoneCenter:.5, zoneWidth:.17,
+    holding:false, lastPulse:performance.now(),
+    event:null, nextEventAt:performance.now() + 2500 + seeded() * 1800,
+    random:seeded, score:0, combo:0, bestCombo:0, perfects:0, goods:0, misses:0,
+    satisfaction:1, stage:'seabed', stageLabel:'해저 이탈', pullCount:0,
+    feedbackTimer:0,
+  };
+  currentView = 'retrieve';
+  ocean.setMode('retrieve', runtime);
+  app.className = 'app minigame-app';
+  app.innerHTML = `<section class="minigame retrieve-game">
+    <header class="game-header"><button data-action="abort-retrieve" aria-label="회수 중단">${icon('close')}</button><div><small>TRAP RETRIEVAL</small><h1>${html(location.name)}</h1></div><span data-depth>${runtime.depth.toFixed(1)}m</span></header>
+    <div class="stage-track"><span class="active" data-stage="seabed"><i>1</i>해저 이탈</span><span data-stage="midwater"><i>2</i>중층 회수</span><span data-stage="surface"><i>3</i>수면 돌파</span></div>
+    <div class="event-banner" data-event-banner><b>바다 상태 안정</b><span>초록 구역에서 줄을 감으세요</span></div>
+    <div class="game-readouts"><span><small>통발 잠금</small><b data-lock>100%</b><i><em data-lock-fill style="width:100%"></em></i></span><span><small>통발 내구</small><b data-durability>${Math.round(runtime.durability)}</b><i><em data-durability-fill style="width:${Math.round(runtime.durability / trap.maxDurability * 100)}%"></em></i></span></div>
+    <div class="pull-panel"><div class="float-feedback" data-feedback></div><div class="timing-gauge"><span class="timing-zone" data-timing-zone></span><i class="timing-marker" data-timing-marker></i></div><div class="tension-row"><small>줄 장력</small><div><i data-tension-fill></i></div><b data-tension>8%</b></div><div class="combo-row"><span><small>COMBO</small><b data-combo>0</b></span><span><small>만족도</small><b data-satisfaction>×1.00</b></span><span><small>점수</small><b data-score>0</b></span></div><button class="hold-button" data-action="hold-pull"><span>${icon('trapline')}</span><div><b>눌러서 줄 감기</b><small data-pull-hint>초록 영역에서 누르고 장력이 높으면 놓으세요</small></div></button></div>
+  </section>`;
+  syncRetrievalDom();
+}
+
+function setHolding(value) {
+  if (!runtime || runtime.type !== 'retrieve' || runtime.resolved) return;
+  runtime.holding = value;
+  const button = $('[data-action="hold-pull"]');
+  button?.classList.toggle('holding', value);
+  if (value) sound.play('tap');
+}
+
+function currentRetrievalStage() {
+  const progress = 1 - runtime.depth / runtime.startDepth;
+  if (progress < .24) return ['seabed','해저 이탈'];
+  if (progress < .8) return ['midwater','중층 회수'];
+  return ['surface','수면 돌파'];
+}
+
+function showFeedback(text, type) {
+  const node = $('[data-feedback]');
+  if (!node) return;
+  clearTimeout(runtime.feedbackTimer);
+  node.textContent = text;
+  node.className = `float-feedback ${type} show`;
+  runtime.feedbackTimer = setTimeout(() => { if (node) node.className = 'float-feedback'; }, 520);
+}
+
+const EVENT_META = {
+  shark:{ title:'상어 접근!', description:'즉시 손을 떼고 지나가길 기다리세요', avoid:'release', className:'danger' },
+  thrash:{ title:'거센 몸부림!', description:'계속 감으면 잠금과 내구도가 떨어집니다', avoid:'release', className:'danger' },

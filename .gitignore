@@ -1,7 +1,9 @@
 node_modules/
 .vercel/
+.generated/
+.dev/
+dist/
 .DS_Store
 *.log
-home.png
-fishing-*.png
-result.png
+playwright-report/
+test-results/

@@ -1,0 +1,190 @@
+  getActiveTrap(id) { return this.state.activeTraps.find((item) => item.id === id); }
+
+  canRetrieve(id, now = Date.now()) {
+    const active = this.getActiveTrap(id);
+    if (!active) return { ok:false, reason:'통발을 찾지 못했어요.' };
+    const status = getTrapStatus(active, now);
+    return { ok:['ready','stale'].includes(status), status, active, reason:['ready','stale'].includes(status) ? '' : '아직 포획 중이에요.' };
+  }
+
+  completeRetrieval(activeId, items, stats, { partial = false, lostCount = 0, now = Date.now() } = {}) {
+    const active = this.getActiveTrap(activeId);
+    if (!active) return { ok:false, reason:'통발을 찾지 못했어요.' };
+    const trapState = this.state.traps[active.trapId];
+    const capacity = this.inventoryCapacity;
+    const free = Math.max(0, capacity - this.state.inventory.length);
+    const storedItems = items.slice(0, free);
+    const overflowItems = items.slice(free);
+    const newSpeciesIds = items.filter((item) => !this.state.collection[item.speciesId]).map((item) => item.speciesId);
+    let overflowCoins = 0;
+    this.mutate((state) => {
+      state.activeTraps = state.activeTraps.filter((item) => item.id !== activeId);
+      state.inventory.unshift(...storedItems);
+      state.profile.successfulRetrievals += items.length ? 1 : 0;
+      state.profile.bestCombo = Math.max(state.profile.bestCombo, stats.bestCombo ?? 0);
+      state.profile.perfectPulls += stats.perfects ?? 0;
+      state.profile.totalCatches += items.reduce((sum, item) => sum + item.quantity, 0);
+      state.profile = applyXp(state.profile, (partial ? 12 : 24) + (stats.perfects ?? 0) * 3 + items.reduce((sum, item) => sum + ({ common:3, uncommon:7, rare:15, epic:34 }[getSpecies(item.speciesId)?.rarity] ?? 2), 0));
+      state.traps[active.trapId].durability = Math.max(0, Math.round(stats.durability ?? trapState.durability));
+      if (active.locationId === 'sunset-reef') state.stats.sunsetRetrievals = (state.stats.sunsetRetrievals ?? 0) + 1;
+
+      for (const item of items) {
+        const speciesItem = getSpecies(item.speciesId);
+        const record = state.collection[item.speciesId] ?? { count:0, firstCaughtAt:item.caughtAt, maxLength:0, maxWeight:0, bestPrice:0, locationId:item.locationId, trapId:item.trapId, baitId:item.baitId };
+        record.count += item.quantity;
+        record.maxLength = Math.max(record.maxLength, item.length);
+        record.maxWeight = Math.max(record.maxWeight, item.weight);
+        record.bestPrice = Math.max(record.bestPrice, item.baseValue);
+        record.locationId = item.locationId;
+        record.trapId = item.trapId;
+        record.baitId = item.baitId;
+        state.collection[item.speciesId] = record;
+        questAdd(state, 'tag', item.quantity, (quest) => speciesItem.tags.includes(quest.tag));
+        if (['large','xl','record'].includes(item.grade)) questAdd(state, 'large', item.quantity);
+      }
+      for (const item of overflowItems) {
+        const quote = getSaleQuote(item, { day:state.profile.day, coolerLevel:state.boat.cooler, channel:'village', now });
+        overflowCoins += quote.amount;
+      }
+      if (overflowCoins) {
+        state.profile.coins += overflowCoins;
+        state.profile.income += overflowCoins;
+      }
+      questAdd(state, 'newSpecies', newSpeciesIds.length);
+      questAdd(state, 'perfect', stats.perfects ?? 0);
+      syncStory(state, { type:'retrieval', items, locationId:active.locationId });
+    });
+    return { ok:true, active, items, storedItems, overflowItems, overflowCoins, partial, lostCount };
+  }
+
+  failRetrieval(activeId, { durability = 0 } = {}) {
+    const active = this.getActiveTrap(activeId);
+    if (!active) return { ok:false, reason:'통발을 찾지 못했어요.' };
+    this.mutate((state) => {
+      state.activeTraps = state.activeTraps.filter((item) => item.id !== activeId);
+      state.traps[active.trapId].durability = Math.max(0, Math.round(durability));
+      state.profile = applyXp(state.profile, 6);
+    });
+    return { ok:true };
+  }
+
+  sellCatch(catchId, channel = 'village', now = Date.now()) {
+    const item = this.state.inventory.find((entry) => entry.id === catchId);
+    if (!item) return { ok:false, reason:'어획물을 찾지 못했어요.' };
+    const quote = getSaleQuote(item, { day:this.state.profile.day, coolerLevel:this.state.boat.cooler, channel, now });
+    const shipping = channel === 'city' ? 80 : 0;
+    const coins = Math.max(0, quote.amount - shipping);
+    this.mutate((state) => {
+      state.inventory = state.inventory.filter((entry) => entry.id !== catchId);
+      state.profile.coins += coins;
+      state.profile.income += coins;
+      if (channel === 'city') {
+        state.profile.citySales += 1;
+        questAdd(state, 'citySale', 1);
+      }
+    });
+    return { ok:true, coins, shipping, quote };
+  }
+
+  sellAll(channel = 'village', now = Date.now()) {
+    if (!this.state.inventory.length) return { ok:false, reason:'판매할 어획물이 없어요.' };
+    const gross = this.state.inventory.reduce((sum, item) => sum + getSaleQuote(item, { day:this.state.profile.day, coolerLevel:this.state.boat.cooler, channel, now }).amount, 0);
+    const shipping = channel === 'city' ? 180 : 0;
+    const coins = Math.max(0, gross - shipping);
+    const count = this.state.inventory.length;
+    this.mutate((state) => {
+      state.inventory = [];
+      state.profile.coins += coins;
+      state.profile.income += coins;
+      if (channel === 'city') {
+        state.profile.citySales += count;
+        questAdd(state, 'citySale', count);
+      }
+    });
+    return { ok:true, coins, shipping, count };
+  }
+
+  buyBait(baitId, quantity = 3) {
+    const bait = getBait(baitId);
+    if (!bait) return { ok:false, reason:'미끼를 찾지 못했어요.' };
+    const cost = bait.price * quantity;
+    if (this.state.profile.coins < cost) return { ok:false, reason:'보유한 조개가 부족해요.' };
+    this.mutate((state) => {
+      state.profile.coins -= cost;
+      state.baits[baitId] = (state.baits[baitId] ?? 0) + quantity;
+    });
+    return { ok:true, cost };
+  }
+
+  buyTrap(trapId) {
+    const trap = getTrap(trapId);
+    if (!trap) return { ok:false, reason:'통발을 찾지 못했어요.' };
+    if (this.state.profile.level < trap.unlockLevel) return { ok:false, reason:`레벨 ${trap.unlockLevel}부터 구입할 수 있어요.` };
+    if (this.state.traps[trapId]?.owned) return { ok:false, reason:'이미 보유한 통발이에요.' };
+    if (this.state.profile.coins < trap.price) return { ok:false, reason:'보유한 조개가 부족해요.' };
+    this.mutate((state) => {
+      state.profile.coins -= trap.price;
+      state.traps[trapId] = { owned:true, durability:trap.maxDurability };
+      state.selection.trapId = trapId;
+    });
+    return { ok:true, cost:trap.price };
+  }
+
+  repairTrap(trapId) {
+    const trap = getTrap(trapId);
+    const trapState = this.state.traps[trapId];
+    if (!trapState?.owned) return { ok:false, reason:'보유하지 않은 통발이에요.' };
+    const cost = getRepairCost(trapState.durability, trap.maxDurability);
+    if (!cost) return { ok:false, reason:'이미 완전히 수리되어 있어요.' };
+    if (this.state.profile.coins < cost) return { ok:false, reason:'수리비가 부족해요.' };
+    this.mutate((state) => {
+      state.profile.coins -= cost;
+      state.traps[trapId].durability = trap.maxDurability;
+    });
+    return { ok:true, cost };
+  }
+
+  upgradeBoat(upgradeId) {
+    const upgrade = getUpgrade(upgradeId);
+    const currentLevel = this.state.boat[upgradeId] ?? 0;
+    if (!upgrade) return { ok:false, reason:'장비를 찾지 못했어요.' };
+    if (currentLevel >= upgrade.maxLevel) return { ok:false, reason:'이미 최고 단계예요.' };
+    const nextLevel = currentLevel + 1;
+    const cost = upgrade.costs[nextLevel];
+    if (this.state.profile.coins < cost) return { ok:false, reason:'보유한 조개가 부족해요.' };
+    this.mutate((state) => {
+      state.profile.coins -= cost;
+      state.boat[upgradeId] = nextLevel;
+      syncStory(state, { type:'upgrade', upgradeId });
+    });
+    return { ok:true, cost, level:nextLevel };
+  }
+
+  claimQuest(questId) {
+    const quest = QUESTS.find((entry) => entry.id === questId);
+    const questState = this.state.quests[questId];
+    if (!quest || !questState || questState.claimed || questState.progress < quest.target) return { ok:false, reason:'아직 완료되지 않은 의뢰예요.' };
+    this.mutate((state) => {
+      state.profile.coins += quest.rewardCoins;
+      state.profile = applyXp(state.profile, quest.rewardXp);
+      state.quests[questId].claimed = true;
+    });
+    return { ok:true, coins:quest.rewardCoins, xp:quest.rewardXp };
+  }
+
+  advanceDay() {
+    this.mutate((state) => {
+      state.profile.day += 1;
+      state.profile.weatherIndex = (state.profile.weatherIndex + 1 + (state.profile.day % 2)) % WEATHER_TYPES.length;
+      if (state.profile.day % 7 === 1) state.profile.seasonIndex = (state.profile.seasonIndex + 1) % SEASONS.length;
+      state.dailyQuestDay = state.profile.day;
+      state.dailyQuestIds = getDailyQuestIds(state.profile.day);
+      state.dailyQuestIds.forEach((id) => { state.quests[id] = { progress:0, claimed:false }; });
+    });
+    return { ok:true, day:this.state.profile.day };
+  }
+
+  updateSetting(key, value) {
+    this.mutate((state) => { state.settings[key] = value; });
+  }
+}

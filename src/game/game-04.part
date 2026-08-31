@@ -1,0 +1,287 @@
+  snag:{ title:'바위에 걸림!', description:'잠시 놓았다가 짧게 끊어 당기세요', avoid:'release', className:'warning' },
+  current:{ title:'급류 통과 중', description:'PERFECT 구역이 잠시 좁아집니다', avoid:'timing', className:'current' },
+  wave:{ title:'큰 파도 접근!', description:'파도가 지나갈 때까지 줄을 놓으세요', avoid:'release', className:'danger' },
+  seal:{ title:'물개가 통발을 노립니다', description:'PERFECT를 맞혀 빠르게 통과하세요', avoid:'timing', className:'warning' },
+};
+
+function triggerRetrievalEvent(time) {
+  if (!runtime || runtime.event || runtime.depth < .45) return;
+  const pools = {
+    seabed:['snag','current','thrash'],
+    midwater:['shark','current','thrash','seal'],
+    surface:['wave','shark','current'],
+  };
+  const pool = pools[runtime.stage] ?? pools.midwater;
+  const type = pool[Math.floor(runtime.random() * pool.length)];
+  runtime.event = { type, startedAt:time, endsAt:time + 2400 + runtime.random() * 1100, safeTime:0, avoided:false, perfects:0 };
+  if (EVENT_META[type].avoid === 'release') { sound.play('danger'); vibrate([80,45,100]); }
+}
+
+function resolveEvent(time, avoided) {
+  if (!runtime?.event) return;
+  const event = runtime.event;
+  if (avoided) {
+    runtime.score += 180;
+    runtime.satisfaction = clamp(runtime.satisfaction + .018, .78, 1.55);
+    showFeedback('위험 회피', 'perfect');
+  } else {
+    const outcome = calculatePullOutcome({ judgement:'miss', combo:runtime.combo, pullPower:runtime.trap.pullPower, stability:runtime.trap.stability, current:runtime.location.current, dangerActive:true, damageMitigation:store.state.boat.hull * .1, stage:runtime.stage, random:runtime.random });
+    runtime.tension = clamp(runtime.tension + outcome.tensionGain, 0, 1.2);
+    runtime.durability = Math.max(0, runtime.durability - outcome.durabilityLoss);
+    runtime.lock = Math.max(0, runtime.lock - outcome.lockLoss);
+    runtime.combo = 0;
+    runtime.satisfaction = clamp(runtime.satisfaction - .055, .78, 1.55);
+    showFeedback('위험 적중', 'miss');
+    sound.play('miss'); vibrate(90);
+  }
+  runtime.event = null;
+  runtime.nextEventAt = time + 3300 + runtime.random() * 3200;
+}
+
+function applyPull(time) {
+  if (!runtime || runtime.resolved) return;
+  runtime.pullCount += 1;
+  const judgement = judgeTiming(runtime.marker, runtime.zoneCenter, runtime.zoneWidth);
+  const eventMeta = runtime.event ? EVENT_META[runtime.event.type] : null;
+  const dangerActive = Boolean(eventMeta?.avoid === 'release');
+  const outcome = calculatePullOutcome({
+    judgement,
+    combo:runtime.combo,
+    pullPower:runtime.trap.pullPower * (1 + store.state.boat.winch * .09),
+    stability:runtime.trap.stability,
+    current:runtime.location.current * weather().currentModifier,
+    dangerActive,
+    damageMitigation:store.state.boat.hull * .1,
+    stage:runtime.stage,
+    random:runtime.random,
+  });
+  runtime.depth = Math.max(0, runtime.depth - outcome.depthGain);
+  runtime.tension = clamp(runtime.tension + outcome.tensionGain, 0, 1.2);
+  runtime.durability = Math.max(0, runtime.durability - outcome.durabilityLoss);
+  runtime.lock = Math.max(0, runtime.lock - outcome.lockLoss);
+  runtime.score += outcome.scoreGain;
+  if (judgement === 'perfect' && !dangerActive) {
+    runtime.combo += 1; runtime.perfects += 1; runtime.satisfaction = clamp(runtime.satisfaction + .024, .78, 1.55); showFeedback('PERFECT', 'perfect'); sound.play('perfect'); vibrate([20,20,35]);
+    if (runtime.event && EVENT_META[runtime.event.type].avoid === 'timing') { runtime.event.perfects += 1; if (runtime.event.perfects >= 2) resolveEvent(time, true); }
+  } else if (judgement === 'good' && !dangerActive) {
+    runtime.combo += 1; runtime.goods += 1; runtime.satisfaction = clamp(runtime.satisfaction + .008, .78, 1.55); showFeedback('GOOD', 'good'); sound.play('good');
+  } else {
+    runtime.combo = 0; runtime.misses += 1; runtime.satisfaction = clamp(runtime.satisfaction - .025, .78, 1.55); showFeedback(dangerActive ? '손을 떼세요!' : 'MISS', 'miss'); sound.play('miss'); vibrate(40);
+  }
+  runtime.bestCombo = Math.max(runtime.bestCombo, runtime.combo);
+}
+
+function syncRetrievalDom() {
+  if (!runtime || runtime.type !== 'retrieve') return;
+  const [stage, label] = currentRetrievalStage();
+  if (runtime.stage !== stage) { runtime.stage = stage; runtime.stageLabel = label; sound.play('good'); }
+  $$('[data-stage]').forEach((node) => node.classList.toggle('active', node.dataset.stage === stage));
+  const event = runtime.event ? EVENT_META[runtime.event.type] : null;
+  const banner = $('[data-event-banner]');
+  if (banner) {
+    banner.className = `event-banner ${event ? `show ${event.className}` : ''}`;
+    banner.querySelector('b').textContent = event?.title ?? `${label} 진행 중`;
+    banner.querySelector('span').textContent = event?.description ?? '초록 구역에서 줄을 감으세요';
+  }
+  const zone = $('[data-timing-zone]');
+  if (zone) { zone.style.left = `${(runtime.zoneCenter - runtime.zoneWidth) * 100}%`; zone.style.width = `${runtime.zoneWidth * 2 * 100}%`; }
+  const marker = $('[data-timing-marker]'); if (marker) marker.style.left = `${runtime.marker * 100}%`;
+  const setText = (selector, value) => { const node = $(selector); if (node) node.textContent = value; };
+  setText('[data-depth]', `${runtime.depth.toFixed(1)}m`);
+  setText('[data-lock]', `${Math.round(runtime.lock)}%`);
+  setText('[data-durability]', `${Math.round(runtime.durability)}`);
+  setText('[data-tension]', `${Math.round(clamp(runtime.tension, 0, 1) * 100)}%`);
+  setText('[data-combo]', runtime.combo);
+  setText('[data-satisfaction]', `×${runtime.satisfaction.toFixed(2)}`);
+  setText('[data-score]', Math.round(runtime.score).toLocaleString('ko-KR'));
+  const lockFill = $('[data-lock-fill]'); if (lockFill) lockFill.style.width = `${runtime.lock}%`;
+  const durabilityFill = $('[data-durability-fill]'); if (durabilityFill) durabilityFill.style.width = `${clamp(runtime.durability / runtime.trap.maxDurability, 0, 1) * 100}%`;
+  const tensionFill = $('[data-tension-fill]'); if (tensionFill) tensionFill.style.width = `${clamp(runtime.tension, 0, 1) * 100}%`;
+  const hint = $('[data-pull-hint]'); if (hint) hint.textContent = event?.avoid === 'release' ? '지금은 손을 떼세요' : runtime.tension > .72 ? '장력이 높습니다. 잠시 손을 떼세요' : '초록 영역에서 누르고 장력이 높으면 놓으세요';
+  $('[data-action="hold-pull"]')?.classList.toggle('danger', event?.avoid === 'release');
+}
+
+function generateRuntimeCatchBatch() {
+  const active = runtime.active;
+  const duration = Math.max(1, active.readyAt - active.deployedAt);
+  const overdueRatio = Math.max(0, (now() - active.readyAt) / duration);
+  return generateCatchBatch({
+    locationItem:runtime.location,
+    trap:runtime.trap,
+    bait:runtime.bait,
+    seed:active.seed,
+    satisfaction:runtime.satisfaction,
+    score:runtime.score,
+    placementQuality:active.placementQuality,
+    weatherRarityModifier:weather().rarityModifier,
+    overdueRatio,
+    now:now(),
+  });
+}
+
+function finishRetrievalSuccess() {
+  if (!runtime || runtime.resolved) return;
+  runtime.resolved = true; runtime.holding = false;
+  const items = generateRuntimeCatchBatch();
+  const result = store.completeRetrieval(runtime.active.id, items, { bestCombo:runtime.bestCombo, perfects:runtime.perfects, durability:runtime.durability });
+  sound.play('catch'); vibrate([60,40,90,40,130]);
+  showCatchResult(result, false);
+}
+
+function finishRetrievalPartial(reason, description, factor) {
+  if (!runtime || runtime.resolved) return;
+  runtime.resolved = true; runtime.holding = false;
+  const batch = generateRuntimeCatchBatch();
+  const salvaged = salvageCatchBatch(batch, factor, runtime.random);
+  let result;
+  if (salvaged.kept.length) {
+    result = store.completeRetrieval(runtime.active.id, salvaged.kept, { bestCombo:runtime.bestCombo, perfects:runtime.perfects, durability:runtime.durability }, { partial:true, lostCount:salvaged.lostCount });
+  } else {
+    store.failRetrieval(runtime.active.id, { durability:runtime.durability });
+    result = { ok:true, items:[], storedItems:[], overflowItems:[], overflowCoins:0, partial:true, lostCount:batch.reduce((sum, item) => sum + item.quantity, 0) };
+  }
+  sound.play('fail'); vibrate([100,70,150]);
+  showCatchResult(result, true, reason, description);
+}
+
+function showCatchResult(result, partial = false, reason = '', description = '') {
+  const items = result.items ?? [];
+  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const estimated = items.reduce((sum, item) => sum + getSaleQuote(item, { day:store.state.profile.day, coolerLevel:store.state.boat.cooler, channel:'village' }).amount, 0);
+  const cards = items.map((item, index) => {
+    const species = getSpecies(item.speciesId);
+    const record = store.state.collection[item.speciesId];
+    const isRecord = record && Math.abs(record.maxLength - item.length) < .01;
+    return `<article class="catch-reveal rarity-${species.rarity}" style="--delay:${index * 90}ms"><span>${speciesGlyph(species)}</span><div><small>${RARITIES[species.rarity].label} · ${SIZE_GRADES[item.grade]?.label ?? '일반'}${isRecord ? ' · 개인 기록' : ''}</small><h3>${html(species.name)} <i>×${item.quantity}</i></h3><p>${item.length.toFixed(1)}cm · ${formatWeight(item.weight)}</p></div><b>${formatCoins(item.baseValue)}</b></article>`;
+  }).join('');
+  showModal(`<div class="result-emblem ${partial ? 'partial' : 'success'}">${items.length ? icon('trapline') : icon('wave')}</div><div class="modal-heading center"><small>${partial ? 'PARTIAL RETRIEVAL' : 'CATCH COMPLETE'}</small><h2>${partial ? html(reason || '일부만 건졌습니다') : `${totalUnits}마리, ${items.length}종 포획`}</h2><p>${partial ? html(description || `${result.lostCount ?? 0}마리가 빠져나갔지만 일부 어획물을 지켰습니다.`) : `최고 콤보 ${runtime?.bestCombo ?? 0} · PERFECT ${runtime?.perfects ?? 0}회 · 만족도 ×${runtime?.satisfaction?.toFixed(2) ?? '1.00'}`}</p></div>${items.length ? `<div class="catch-list">${cards}</div><div class="result-summary"><span><small>예상 판매가</small><b>${formatCoins(estimated)}조개</b></span><span><small>창고 보관</small><b>${result.storedItems?.length ?? items.length}건</b></span><span><small>자동 직거래</small><b>${result.overflowCoins ? `${formatCoins(result.overflowCoins)}조개` : '없음'}</b></span></div>` : `<div class="empty-result"><p>이번 통발에서는 어획물을 지키지 못했습니다. 장력이 75%를 넘으면 손을 조금 일찍 떼보세요.</p></div>`}<div class="modal-actions"><button data-action="result-home">항구로</button><button class="primary" data-action="result-market">어시장 확인</button></div>`, 'catch-result-modal', false);
+}
+
+function abortRetrievalConfirm() {
+  if (!runtime || runtime.type !== 'retrieve') return;
+  showModal(`<div class="modal-heading"><small>ABORT RETRIEVAL</small><h2>회수를 중단할까요?</h2><p>통발은 바다에 남아 다시 회수할 수 있습니다. 현재 진행 상태만 초기화됩니다.</p></div><div class="modal-actions"><button data-action="resume-retrieve">계속 회수</button><button class="danger" data-action="leave-retrieve">중단</button></div>`, 'confirm-modal');
+}
+
+function updateDeployment(dt) {
+  if (!runtime || runtime.type !== 'deploy' || runtime.stopped) return;
+  runtime.marker += runtime.direction * dt * runtime.speed;
+  if (runtime.marker >= 1) { runtime.marker = 1; runtime.direction = -1; }
+  if (runtime.marker <= 0) { runtime.marker = 0; runtime.direction = 1; }
+  const marker = $('[data-deploy-marker]');
+  if (marker) marker.style.left = `${runtime.marker * 100}%`;
+}
+
+function updateRetrieval(dt, time) {
+  if (!runtime || runtime.type !== 'retrieve' || runtime.resolved) return;
+  const speed = .72 + runtime.location.current * .27 + (runtime.stage === 'surface' ? .11 : 0);
+  runtime.marker += runtime.markerDirection * dt * speed;
+  if (runtime.marker >= 1) { runtime.marker = 1; runtime.markerDirection = -1; }
+  if (runtime.marker <= 0) { runtime.marker = 0; runtime.markerDirection = 1; }
+
+  const seconds = time / 1000;
+  runtime.zoneCenter = clamp(.5 + Math.sin(seconds * 1.34) * .15 + Math.sin(seconds * .47) * .035, .22, .78);
+  const stageModifier = runtime.stage === 'seabed' ? .9 : runtime.stage === 'surface' ? .82 : 1;
+  const eventModifier = runtime.event?.type === 'current' ? .54 : runtime.event?.type === 'seal' ? .67 : 1;
+  runtime.zoneWidth = clamp((.205 - runtime.location.current * .035) * stageModifier * eventModifier, .065, .19);
+
+  if (runtime.holding) {
+    runtime.tension = clamp(runtime.tension + dt * (.035 + runtime.location.current * .024) / Math.max(.7, runtime.trap.stability + store.state.boat.hull * .04), 0, 1.2);
+    if (time - runtime.lastPulse >= 470) { runtime.lastPulse = time; applyPull(time); }
+  } else {
+    runtime.tension = clamp(runtime.tension - dt * (.24 + runtime.trap.stability * .07), .02, 1.2);
+    runtime.lock = clamp(runtime.lock + dt * 1.05, 0, 100);
+  }
+
+  if (!runtime.event && time >= runtime.nextEventAt && runtime.depth > .55) triggerRetrievalEvent(time);
+  if (runtime.event) {
+    const meta = EVENT_META[runtime.event.type];
+    if (meta.avoid === 'release') {
+      if (!runtime.holding) runtime.event.safeTime += dt;
+      else runtime.event.safeTime = Math.max(0, runtime.event.safeTime - dt * .5);
+      if (runtime.event.safeTime >= .68) resolveEvent(time, true);
+    }
+    if (runtime.event && time >= runtime.event.endsAt) resolveEvent(time, false);
+  }
+
+  if (runtime.tension >= 1) finishRetrievalPartial('줄 장력 초과', '줄이 크게 손상되어 가장 무거운 어획물 일부가 빠져나갔습니다.', .38);
+  else if (runtime.lock <= 0) finishRetrievalPartial('통발 문이 열렸습니다', '잠금이 풀려 절반 이상의 생물이 탈출했습니다.', .32);
+  else if (runtime.durability <= 0) finishRetrievalPartial('통발이 파손됐습니다', '통발은 수리가 필요하지만 작은 어획물 일부는 건졌습니다.', .24);
+  else if (runtime.depth <= 0) finishRetrievalSuccess();
+
+  syncRetrievalDom();
+}
+
+function updateCountdowns(currentTime) {
+  $$('[data-countdown]').forEach((node) => {
+    const trap = store.getActiveTrap(node.dataset.countdown);
+    if (!trap) return;
+    const status = getTrapStatus(trap, currentTime);
+    node.textContent = ['ready','stale'].includes(status) ? (status === 'stale' ? '오래 방치됨' : '지금 회수') : formatDuration(getRemainingMs(trap, currentTime));
+  });
+}
+
+function checkReadyNotifications() {
+  store.state.activeTraps.forEach((active) => {
+    const status = getTrapStatus(active);
+    if (!['ready','stale'].includes(status) || notifiedReady.has(active.id)) return;
+    notifiedReady.add(active.id);
+    sound.play('ready');
+    const location = getLocation(active.locationId);
+    toast(`${location.name} ${active.slot}번 통발이 준비됐습니다.`, 'success');
+    if (globalThis.Notification?.permission === 'granted' && document.visibilityState !== 'visible') {
+      try { new Notification('파도 아래 · 통발 준비', { body:`${location.name} ${active.slot}번 라인이 크게 흔들립니다.`, icon:'./assets/icon-192.png', tag:active.id }); } catch { /* ignored */ }
+    }
+  });
+  const existing = new Set(store.state.activeTraps.map((trap) => trap.id));
+  notifiedReady = new Set([...notifiedReady].filter((id) => existing.has(id)));
+}
+
+function animationLoop(time) {
+  const dt = Math.min(.05, Math.max(0, (time - lastFrame) / 1000));
+  lastFrame = time;
+  if (runtime?.type === 'deploy') updateDeployment(dt);
+  if (runtime?.type === 'retrieve') updateRetrieval(dt, time);
+  ocean.render(time);
+  if (time - lastTimerRefresh > 500) {
+    lastTimerRefresh = time;
+    updateCountdowns(now());
+    checkReadyNotifications();
+  }
+  requestAnimationFrame(animationLoop);
+}
+
+async function requestNotificationPermission() {
+  if (!globalThis.Notification) { toast('이 브라우저는 알림을 지원하지 않습니다.', 'error'); return; }
+  try {
+    const permission = await Notification.requestPermission();
+    store.updateSetting('notificationPrompted', true);
+    if (permission === 'granted') {
+      new Notification('파도 아래 알림 준비 완료', { body:'통발 회수 시간이 되면 알려드립니다.', icon:'./assets/icon-192.png' });
+      toast('통발 준비 알림을 켰습니다.', 'success');
+    } else toast('알림이 허용되지 않았습니다.', 'error');
+  } catch { toast('알림 권한을 요청하지 못했습니다.', 'error'); }
+}
+
+function chooseBestBulkChannel() {
+  const items = store.state.inventory;
+  const village = items.reduce((sum, item) => sum + getSaleQuote(item, { day:store.state.profile.day, coolerLevel:store.state.boat.cooler, channel:'village' }).amount, 0);
+  const cityGross = items.reduce((sum, item) => sum + getSaleQuote(item, { day:store.state.profile.day, coolerLevel:store.state.boat.cooler, channel:'city' }).amount, 0);
+  const city = Math.max(0, cityGross - 180);
+  return city > village ? 'city' : 'village';
+}
+
+async function handleAction(target) {
+  const button = target.closest('[data-action]');
+  if (!button || button.disabled) return;
+  const action = button.dataset.action;
+  const id = button.dataset.id;
+  if (!['hold-pull','resolve-deploy'].includes(action)) sound.play('tap');
+
+  switch (action) {
+    case 'navigate': route(button.dataset.view); break;
+    case 'open-setup': renderSetup(); break;
+    case 'close-setup': route('harbor'); break;
+    case 'close-modal': closeModal(); break;
+    case 'open-settings': showSettings(); break;
+    case 'confirm-reset': showResetConfirm(); break;
+    case 'reset-game': store.reset(); closeModal(); route('harbor'); toast('새로운 조업 기록을 시작했습니다.', 'success'); break;

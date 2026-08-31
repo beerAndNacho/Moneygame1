@@ -1,18 +1,14 @@
 {
-  "name": "파도 아래: 통발 일지",
-  "short_name": "통발 일지",
-  "description": "통발을 내리고 타이밍에 맞춰 끌어올리는 모바일 낚시 게임",
-  "start_url": "/",
+  "name": "파도 아래: 트랩라인",
+  "short_name": "파도 아래",
+  "description": "통발 설치와 회수, 수집, 시장 운영을 즐기는 모바일 웹게임",
+  "start_url": "./",
   "display": "standalone",
-  "background_color": "#07101b",
-  "theme_color": "#081522",
   "orientation": "portrait",
+  "background_color": "#071722",
+  "theme_color": "#071722",
   "icons": [
-    {
-      "src": "/assets/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
+    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png"}
   ]
 }

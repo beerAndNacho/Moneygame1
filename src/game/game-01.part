@@ -1,0 +1,312 @@
+import {
+  BAITS,
+  BOAT_UPGRADES,
+  LOCATIONS,
+  MARKET_CATEGORIES,
+  NPCS,
+  QUESTS,
+  RARITIES,
+  SIZE_GRADES,
+  SPECIES,
+  STORY_STEPS,
+  TRAPS,
+  GameStore,
+  calculatePullOutcome,
+  clamp,
+  formatCoins,
+  formatWeight,
+  generateCatchBatch,
+  getBait,
+  getFreshness,
+  getFreshnessMeta,
+  getLocation,
+  getMarketSnapshot,
+  getRemainingMs,
+  getRepairCost,
+  getSaleQuote,
+  getSpecies,
+  getTrap,
+  getTrapProgress,
+  getTrapStatus,
+  getUpgrade,
+  judgePlacement,
+  judgeTiming,
+  mulberry32,
+  salvageCatchBatch,
+  xpRequiredForLevel,
+} from './game-core.js';
+
+const app = document.querySelector('#app');
+const modalRoot = document.querySelector('#modal-root');
+const toastRoot = document.querySelector('#toast-root');
+const canvas = document.querySelector('#ocean-canvas');
+const store = new GameStore();
+
+let currentView = 'harbor';
+let runtime = null;
+let lastFrame = performance.now();
+let lastTimerRefresh = 0;
+let notifiedReady = new Set();
+let deferredInstallPrompt = null;
+let modalDismissible = true;
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const now = () => Date.now();
+const html = (value) => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
+
+const formatDuration = (milliseconds) => {
+  const total = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분`;
+  if (minutes > 0) return `${minutes}분 ${String(seconds).padStart(2, '0')}초`;
+  return `${seconds}초`;
+};
+
+const formatDate = (iso) => {
+  try { return new Date(iso).toLocaleDateString('ko-KR', { month:'short', day:'numeric' }); }
+  catch { return '-'; }
+};
+
+function icon(name, className = '') {
+  const paths = {
+    harbor:'<path d="M3 20h18M5 20v-8l7-6 7 6v8M9 20v-5h6v5M3 11l9-8 9 8"/>',
+    trapline:'<path d="M6 5h12l2 15H4L6 5Zm1 4h10M6 14h12M9 5v15m6-15v15"/>',
+    market:'<path d="M4 9h16l-1 11H5L4 9Zm2 0 2-5h8l2 5M8 13h8M8 17h5"/>',
+    book:'<path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5Zm16 0A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z"/>',
+    village:'<path d="M3 20h18M5 20v-9l7-6 7 6v9M9 20v-6h6v6M4 10l8-7 8 7"/>',
+    coin:'<circle cx="12" cy="12" r="9"/><path d="M9 9.5c0-1.2 1.2-2 3-2s3 .8 3 2-1.2 2-3 2-3 .8-3 2 1.2 2 3 2 3-.8 3-2M12 5.5v13"/>',
+    clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    anchor:'<path d="M12 3v15M8 7h8M5 13c0 5 3 8 7 8s7-3 7-8M5 13l-2 3m16-3 2 3"/><circle cx="12" cy="4" r="1.5"/>',
+    bait:'<path d="M6 7c5 0 8 3 8 7a4 4 0 0 1-8 0c0-3 2-5 5-5M14 14c3 0 5-2 5-5V4"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2"/>',
+    lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    check:'<path d="m4 12 5 5L20 6"/>',
+    close:'<path d="M5 5l14 14M19 5 5 14"/>',
+    arrow:'<path d="m9 5 7 7-7 7"/>',
+    back:'<path d="m15 5-7 7 7 7"/>',
+    sonar:'<circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4m8.4 0a6 6 0 0 0 0-8.4M4.6 4.6a10.5 10.5 0 0 0 0 14.8m14.8 0a10.5 10.5 0 0 0 0-14.8"/>',
+    box:'<path d="M4 7h16v13H4V7Zm2-3h12l2 3H4l2-3Zm3 7h6"/>',
+    wave:'<path d="M2 10c3-4 5 4 8 0s5 4 8 0 4 1 4 1M2 16c3-4 5 4 8 0s5 4 8 0 4 1 4 1"/>',
+    bell:'<path d="M6 17h12l-2-3V9a4 4 0 0 0-8 0v5l-2 3Zm4 3h4"/>',
+    wrench:'<path d="M14 6a4 4 0 0 0-5 5L3 17l4 4 6-6a4 4 0 0 0 5-5l-3 3-3-3 2-4Z"/>',
+    cart:'<path d="M3 4h2l2 11h10l3-8H6M9 20h.1M17 20h.1"/>',
+    play:'<path d="m8 5 11 7-11 7V5Z"/>',
+    pause:'<path d="M8 5v14M16 5v14"/>',
+    refresh:'<path d="M20 6v6h-6M4 18v-6h6M18 9a7 7 0 0 0-12-2M6 15a7 7 0 0 0 12 2"/>',
+    install:'<path d="M12 3v12m0 0 5-5m-5 5-5-5M5 19h14"/>',
+  };
+  return `<svg class="ui-icon ${className}" viewBox="0 0 24 24" aria-hidden="true">${paths[name] ?? paths.wave}</svg>`;
+}
+
+function speciesGlyph(species, className = '') {
+  const categoryMap = {
+    crustacean:'crab', cephalopod:'octopus', shellfish:'shell', fish:'fish', deepsea:'deep',
+  };
+  const shapes = {
+    fish:'<path d="M4 12c4-6 10-6 14-2l3-3v10l-3-3c-4 4-10 4-14-2Zm5 0h.1"/>',
+    crab:'<path d="M7 10h10v7H7v-7Zm2-3 2 3m4-3-2 3M7 12 3 9m4 6-4 3m14-6 4-3m-4 6 4 3M9 17v3m6-3v3"/>',
+    octopus:'<path d="M8 12V9a4 4 0 0 1 8 0v3c3 2 2 6 0 7-2 1-2-2-3-1-1 1-1 3-3 2-2-1 0-3-2-3-1 0-2 3-4 1-2-2-1-5 2-6Zm2-3h.1m4 0h.1"/>',
+    shell:'<path d="M4 18c0-7 3-12 8-12s8 5 8 12H4Zm8-12v12M7 8l3 10m7-10-3 10M5 12l5 6m9-6-5 6"/>',
+    deep:'<path d="M4 14c4-5 10-6 15-2l2-3v8l-2-3c-5 4-11 3-15 0Zm6-2h.1M12 4v4m-3-2 3 2 3-2"/>',
+  };
+  const key = categoryMap[species?.category] ?? 'fish';
+  return `<svg class="species-glyph ${className}" viewBox="0 0 24 24" aria-hidden="true">${shapes[key]}</svg>`;
+}
+
+class SoundEngine {
+  constructor() { this.context = null; }
+  ensure() {
+    if (!store.state.settings.sound) return null;
+    if (!this.context) this.context = new AudioContext();
+    if (this.context.state === 'suspended') this.context.resume();
+    return this.context;
+  }
+  tone(frequency = 440, duration = .08, type = 'sine', volume = .035, delay = 0) {
+    const context = this.ensure();
+    if (!context) return;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(.0001, context.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(volume, context.currentTime + delay + .01);
+    gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + delay + duration);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(context.currentTime + delay);
+    oscillator.stop(context.currentTime + delay + duration + .02);
+  }
+  play(name) {
+    const map = {
+      tap:[[330,.04,'sine',.018,0]],
+      good:[[480,.08,'sine',.028,0]],
+      perfect:[[620,.09,'triangle',.035,0],[830,.12,'triangle',.025,.07]],
+      miss:[[180,.12,'sawtooth',.025,0]],
+      danger:[[115,.18,'sawtooth',.04,0],[95,.18,'sawtooth',.03,.19]],
+      deploy:[[230,.12,'triangle',.03,0],[165,.18,'sine',.025,.11]],
+      ready:[[440,.12,'triangle',.035,0],[660,.15,'triangle',.035,.14],[880,.2,'triangle',.025,.3]],
+      catch:[[440,.12,'triangle',.035,0],[660,.12,'triangle',.035,.12],[990,.24,'sine',.03,.24]],
+      coin:[[740,.06,'square',.02,0],[960,.09,'square',.018,.07]],
+      fail:[[190,.2,'sawtooth',.04,0],[130,.3,'sine',.035,.18]],
+    };
+    (map[name] ?? map.tap).forEach((args) => this.tone(...args));
+  }
+}
+
+const sound = new SoundEngine();
+const vibrate = (pattern) => {
+  if (store.state.settings.vibration && navigator.vibrate) navigator.vibrate(pattern);
+};
+
+function toast(message, type = '') {
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.textContent = message;
+  toastRoot.append(node);
+  requestAnimationFrame(() => node.classList.add('show'));
+  setTimeout(() => {
+    node.classList.remove('show');
+    setTimeout(() => node.remove(), 220);
+  }, 2200);
+}
+
+function showModal(content, className = '', dismissible = true) {
+  modalDismissible = dismissible;
+  modalRoot.innerHTML = `<div class="modal-backdrop" ${dismissible ? 'data-action="close-modal"' : ''}></div><section class="modal-card ${className}" role="dialog" aria-modal="true">${dismissible ? `<button class="modal-close" data-action="close-modal" aria-label="닫기">${icon('close')}</button>` : ''}${content}</section>`;
+  modalRoot.classList.add('open');
+}
+
+function closeModal() {
+  if (!modalDismissible && runtime?.resolved === false) return;
+  modalRoot.classList.remove('open');
+  setTimeout(() => { modalRoot.innerHTML = ''; }, 180);
+}
+
+class OceanRenderer {
+  constructor(target) {
+    this.canvas = target;
+    this.ctx = target.getContext('2d');
+    this.mode = 'harbor';
+    this.runtime = null;
+    this.width = 1;
+    this.height = 1;
+    this.resize = this.resize.bind(this);
+    addEventListener('resize', this.resize);
+    this.resize();
+  }
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const ratio = Math.min(2, devicePixelRatio || 1);
+    this.width = Math.max(1, rect.width);
+    this.height = Math.max(1, rect.height);
+    this.canvas.width = Math.round(this.width * ratio);
+    this.canvas.height = Math.round(this.height * ratio);
+    this.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    this.ctx.imageSmoothingEnabled = false;
+  }
+  setMode(mode, value = null) { this.mode = mode; this.runtime = value; }
+  roundedRect(x, y, w, h, r) {
+    const c = this.ctx;
+    const radius = Math.min(r, w / 2, h / 2);
+    c.beginPath(); c.moveTo(x + radius, y); c.arcTo(x + w, y, x + w, y + h, radius); c.arcTo(x + w, y + h, x, y + h, radius); c.arcTo(x, y + h, x, y, radius); c.arcTo(x, y, x + w, y, radius); c.closePath();
+  }
+  drawBoat(x, y, scale, phase) {
+    const c = this.ctx;
+    c.save(); c.translate(x, y + Math.sin(phase) * 3); c.scale(scale, scale);
+    c.fillStyle = '#b9573f'; c.beginPath(); c.moveTo(-72, 2); c.lineTo(66, 2); c.lineTo(44, 31); c.lineTo(-50, 31); c.closePath(); c.fill();
+    c.fillStyle = '#ead2aa'; c.fillRect(-24, -34, 58, 36); c.fillStyle = '#113342'; c.fillRect(-15, -27, 17, 14); c.fillRect(9, -27, 17, 14);
+    c.fillStyle = '#ce9859'; c.fillRect(16, -82, 5, 48); c.fillStyle = '#d86b50'; c.beginPath(); c.moveTo(21, -78); c.lineTo(60, -63); c.lineTo(21, -48); c.closePath(); c.fill();
+    c.fillStyle = '#102633'; c.fillRect(-54, 31, 89, 7); c.restore();
+  }
+  drawTrap(x, y, scale, tension = 0, phase = 0) {
+    const c = this.ctx;
+    c.save(); c.translate(x + Math.sin(phase * 1.4) * 3, y); c.rotate(Math.sin(phase) * .025 + tension * .03); c.scale(scale, scale);
+    c.fillStyle = 'rgba(8,26,35,.88)'; c.strokeStyle = tension > .76 ? '#ff746e' : '#91e2c7'; c.lineWidth = 4; this.roundedRect(-35, -23, 70, 46, 5); c.fill(); c.stroke(); c.lineWidth = 2;
+    for (let lx = -23; lx <= 23; lx += 15) { c.beginPath(); c.moveTo(lx, -21); c.lineTo(lx, 21); c.stroke(); }
+    for (let ly = -10; ly <= 10; ly += 10) { c.beginPath(); c.moveTo(-33, ly); c.lineTo(33, ly); c.stroke(); }
+    c.restore();
+  }
+  drawFish(x, y, scale, direction, color, phase) {
+    const c = this.ctx;
+    c.save(); c.translate(x, y + Math.sin(phase) * 4); c.scale(scale * direction, scale); c.fillStyle = color;
+    c.beginPath(); c.ellipse(0, 0, 18, 9, 0, 0, Math.PI * 2); c.fill(); c.beginPath(); c.moveTo(-17, 0); c.lineTo(-31, -10); c.lineTo(-28, 11); c.closePath(); c.fill(); c.fillStyle = '#071924'; c.fillRect(8, -3, 3, 3); c.restore();
+  }
+  drawSkyAndSea(time) {
+    const c = this.ctx, w = this.width, h = this.height, horizon = h * .42;
+    const sky = c.createLinearGradient(0, 0, 0, horizon); sky.addColorStop(0, '#06131f'); sky.addColorStop(.55, '#183d54'); sky.addColorStop(1, '#cc775f'); c.fillStyle = sky; c.fillRect(0, 0, w, horizon);
+    c.fillStyle = '#f2ce7b'; c.beginPath(); c.arc(w * .78, horizon * .32, 20, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = .48; c.fillStyle = '#fff6c4'; for (let i = 0; i < 22; i += 1) c.fillRect((i * 73 + 31) % w, (i * 47 + 18) % Math.max(1, horizon * .55), i % 4 ? 1 : 2, i % 4 ? 1 : 2); c.globalAlpha = 1;
+    c.fillStyle = '#0a3140'; c.beginPath(); c.moveTo(0, horizon); c.lineTo(w * .19, horizon - 36); c.lineTo(w * .34, horizon); c.lineTo(w * .55, horizon - 18); c.lineTo(w * .7, horizon); c.closePath(); c.fill();
+    const sea = c.createLinearGradient(0, horizon, 0, h); sea.addColorStop(0, '#176e79'); sea.addColorStop(.42, '#0c4a59'); sea.addColorStop(1, '#061d2a'); c.fillStyle = sea; c.fillRect(0, horizon, w, h - horizon);
+    c.strokeStyle = 'rgba(181,242,225,.28)'; c.lineWidth = 2; for (let row = 0; row < 8; row += 1) { const y = horizon + 14 + row * 24; c.beginPath(); for (let x = -20; x <= w + 20; x += 14) { const wave = Math.sin(x * .04 + time * .0018 + row) * 3.5; x === -20 ? c.moveTo(x, y + wave) : c.lineTo(x, y + wave); } c.stroke(); }
+    return horizon;
+  }
+  drawHarbor(time) {
+    const horizon = this.drawSkyAndSea(time); this.drawBoat(this.width * .5, horizon + 35, Math.min(1.08, this.width / 390), time * .0018);
+    const active = store.state.activeTraps.slice(0, 3); active.forEach((trap, index) => { const c = this.ctx; const x = this.width * (.25 + index * .25); const y = horizon + 110 + Math.sin(time * .002 + index) * 4; c.strokeStyle = 'rgba(218,244,229,.5)'; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 24); c.stroke(); c.fillStyle = ['ready','stale'].includes(getTrapStatus(trap)) ? '#f3c96e' : '#d15d4a'; c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fill(); });
+  }
+  drawDeploy(time) {
+    const horizon = this.drawSkyAndSea(time); this.drawBoat(this.width * .5, horizon + 25, Math.min(1.05, this.width / 390), time * .0018);
+    const marker = this.runtime?.marker ?? .5; const trapY = horizon + 90 + marker * Math.max(100, this.height - horizon - 170); const c = this.ctx;
+    c.strokeStyle = '#dbe7c7'; c.lineWidth = 2; c.beginPath(); c.moveTo(this.width * .5 - 48, horizon + 45); c.lineTo(this.width * .5, trapY - 24); c.stroke(); this.drawTrap(this.width * .5, trapY, .72, .1, time * .002);
+  }
+  drawRetrieve(time) {
+    const c = this.ctx, w = this.width, h = this.height; const gradient = c.createLinearGradient(0, 0, 0, h); gradient.addColorStop(0, '#145f6b'); gradient.addColorStop(.34, '#0b4051'); gradient.addColorStop(1, '#041620'); c.fillStyle = gradient; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(159,230,214,.16)'; c.lineWidth = 1; for (let row = 0; row < 9; row += 1) { const y = row * 48 + Math.sin(time * .001 + row) * 4; c.beginPath(); c.moveTo(0, y); c.quadraticCurveTo(w / 2, y + 12, w, y); c.stroke(); }
+    for (let i = 0; i < 9; i += 1) { const x = (i * 71 + time * (i % 2 ? .01 : -.008)) % (w + 80) - 40; const y = 105 + ((i * 97) % Math.max(140, h - 260)); this.drawFish(x, y, .52 + (i % 3) * .12, i % 2 ? 1 : -1, 'rgba(132,197,196,.24)', time * .002 + i); }
+    const start = this.runtime?.startDepth || 8; const progress = clamp(1 - (this.runtime?.depth || start) / start, 0, 1); const trapY = h - 115 - progress * Math.max(130, h - 270);
+    c.strokeStyle = this.runtime?.tension > .78 ? '#ff746d' : '#d9e4bc'; c.lineWidth = 2.4; c.beginPath(); c.moveTo(w * .5, -10); c.lineTo(w * .5 + Math.sin(time * .003) * (this.runtime?.tension || 0) * 12, trapY - 22); c.stroke(); this.drawTrap(w * .5, trapY, .9, this.runtime?.tension || 0, time * .0025);
+    if (this.runtime?.event?.type === 'shark') { c.fillStyle = 'rgba(5,18,25,.84)'; c.beginPath(); c.moveTo(w * .08, h * .42); c.quadraticCurveTo(w * .42, h * .3, w * .8, h * .44); c.quadraticCurveTo(w * .46, h * .55, w * .08, h * .42); c.fill(); c.beginPath(); c.moveTo(w * .48, h * .36); c.lineTo(w * .57, h * .23); c.lineTo(w * .61, h * .4); c.fill(); }
+    if (this.runtime?.event?.type === 'snag') { c.fillStyle = 'rgba(18,24,27,.78)'; c.fillRect(w * .18, h * .72, w * .64, 12); for (let i = 0; i < 8; i += 1) { c.beginPath(); c.arc(w * (.2 + i * .08), h * .72, 8 + i % 3 * 4, 0, Math.PI * 2); c.fill(); } }
+    c.fillStyle = 'rgba(137,219,204,.38)'; for (let i = 0; i < 16; i += 1) { const x = (i * 83 + 29) % w; const y = h - ((time * (.02 + (i % 4) * .008) + i * 67) % h); c.beginPath(); c.arc(x, y, 1 + i % 3, 0, Math.PI * 2); c.fill(); }
+  }
+  render(time) { this.ctx.clearRect(0, 0, this.width, this.height); if (this.mode === 'retrieve') this.drawRetrieve(time); else if (this.mode === 'deploy') this.drawDeploy(time); else this.drawHarbor(time); }
+}
+
+const ocean = new OceanRenderer(canvas);
+
+const STATUS_META = {
+  sinking:{ label:'가라앉는 중', className:'sinking' },
+  fishing:{ label:'포획 중', className:'fishing' },
+  ready:{ label:'회수 가능', className:'ready' },
+  stale:{ label:'오래 방치됨', className:'stale' },
+  retrieving:{ label:'회수 중', className:'retrieving' },
+};
+
+function currentStoryStep() {
+  return store.state.story.completed ? null : STORY_STEPS[store.state.story.stepIndex] ?? null;
+}
+
+function weather() { return store.weather; }
+function season() { return store.season; }
+
+function renderTopHud(title = '항구', backAction = '') {
+  const state = store.state;
+  const xpTarget = xpRequiredForLevel(state.profile.level);
+  const readyCount = state.activeTraps.filter((trap) => ['ready','stale'].includes(getTrapStatus(trap))).length;
+  return `<header class="top-hud">
+    ${backAction ? `<button class="hud-icon" data-action="${backAction}" aria-label="뒤로">${icon('back')}</button>` : `<div class="day-chip"><span>${html(weather().icon)}</span><div><small>${html(season())} · ${state.profile.day}일</small><b>${html(title)}</b></div></div>`}
+    ${backAction ? `<div class="hud-center"><small>${html(season())} · ${state.profile.day}일</small><b>${html(title)}</b></div>` : ''}
+    <div class="hud-actions">
+      ${readyCount ? `<button class="ready-chip" data-action="navigate" data-view="trapline">${icon('bell')}<b>${readyCount}</b></button>` : ''}
+      <div class="coin-chip">${icon('coin')}<b>${formatCoins(state.profile.coins)}</b></div>
+      <button class="level-chip" data-action="open-settings"><b>LV.${state.profile.level}</b><span><i style="width:${Math.round(clamp(state.profile.xp / xpTarget, 0, 1) * 100)}%"></i></span></button>
+    </div>
+  </header>`;
+}
+
+function renderBottomNav(active) {
+  const readyCount = store.state.activeTraps.filter((trap) => ['ready','stale'].includes(getTrapStatus(trap))).length;
+  const questCount = store.state.dailyQuestIds.filter((id) => {
+    const quest = QUESTS.find((entry) => entry.id === id);
+    const progress = store.state.quests[id];
+    return quest && progress && !progress.claimed && progress.progress >= quest.target;
+  }).length;
+  const entries = [
+    ['harbor','항구','harbor'],

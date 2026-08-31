@@ -1,0 +1,404 @@
+    depthGain: row.depth * pullPower * stageDepth,
+    tensionGain: (row.tension * stageTension + instability * .055) * mitigation,
+    durabilityLoss: Math.max(0, Math.round(row.durability * mitigation)),
+    lockLoss: Math.max(0, Math.round(row.lock * mitigation)),
+    scoreGain: row.score,
+    comboDelta: row.combo,
+  };
+}
+
+export function getSlotCount(rackLevel = 1) {
+  return clamp(Math.round(rackLevel), 1, 3);
+}
+
+export function getInventoryCapacity(coolerLevel = 0) {
+  return [8, 14, 20, 28][clamp(Math.round(coolerLevel), 0, 3)];
+}
+
+export function getWaitDuration(locationItem, engineLevel = 1, placementQuality = 'stable', firstDeployment = false) {
+  if (firstDeployment) return 15_000;
+  const engineMultiplier = [1, 1, .9, .8][clamp(Math.round(engineLevel), 0, 3)];
+  const qualityMultiplier = { perfect:.9, stable:1, unstable:1.1 }[placementQuality] ?? 1;
+  return Math.round(locationItem.waitSeconds * 1000 * engineMultiplier * qualityMultiplier);
+}
+
+export function getTrapStatus(activeTrap, now = Date.now()) {
+  if (!activeTrap) return 'empty';
+  if (activeTrap.status === 'retrieving') return 'retrieving';
+  const duration = Math.max(1, activeTrap.readyAt - activeTrap.deployedAt);
+  if (now >= activeTrap.readyAt + duration * 1.5) return 'stale';
+  if (now >= activeTrap.readyAt) return 'ready';
+  if (now < activeTrap.deployedAt + duration * .12) return 'sinking';
+  return 'fishing';
+}
+
+export function getTrapProgress(activeTrap, now = Date.now()) {
+  if (!activeTrap) return 0;
+  return clamp((now - activeTrap.deployedAt) / Math.max(1, activeTrap.readyAt - activeTrap.deployedAt), 0, 1);
+}
+
+export function getRemainingMs(activeTrap, now = Date.now()) {
+  return Math.max(0, activeTrap.readyAt - now);
+}
+
+export function getMarketSnapshot(day = 1) {
+  const random = mulberry32(hashString(`market-${day}`));
+  const hotIndex = Math.floor(random() * MARKET_CATEGORIES.length);
+  const prices = {};
+  MARKET_CATEGORIES.forEach((category, index) => {
+    let multiplier = .78 + random() * .46;
+    if (index === hotIndex) multiplier += .18 + random() * .14;
+    prices[category.id] = roundTo(clamp(multiplier, .72, 1.42), 2);
+  });
+  return { day, hotCategoryId: MARKET_CATEGORIES[hotIndex].id, prices };
+}
+
+export function getFreshness(item, coolerLevel = 0, now = Date.now()) {
+  const caughtAt = Date.parse(item.caughtAt ?? item.createdAt ?? new Date(now).toISOString());
+  const elapsedHours = Math.max(0, now - caughtAt) / 3_600_000;
+  const lossPerHour = [4.8, 3.6, 2.5, 1.45][clamp(Math.round(coolerLevel), 0, 3)];
+  return clamp(Math.round(100 - elapsedHours * lossPerHour), 0, 100);
+}
+
+export function getFreshnessMeta(freshness) {
+  if (freshness >= 92) return { label:'갓 잡음', multiplier:1.1, className:'fresh' };
+  if (freshness >= 70) return { label:'신선', multiplier:1, className:'good' };
+  if (freshness >= 40) return { label:'보통', multiplier:.9, className:'normal' };
+  return { label:'오래됨', multiplier:.7, className:'old' };
+}
+
+export function getSaleQuote(item, { day = 1, coolerLevel = 0, channel = 'village', now = Date.now() } = {}) {
+  const freshness = getFreshness(item, coolerLevel, now);
+  const freshnessMeta = getFreshnessMeta(freshness);
+  const speciesItem = getSpecies(item.speciesId);
+  const baseValue = item.baseValue ?? item.value ?? 0;
+  const market = getMarketSnapshot(day);
+  const marketMultiplier = market.prices[speciesItem?.category] ?? 1;
+  const channelMultiplier = channel === 'city' ? marketMultiplier * 1.08 : 1;
+  return {
+    freshness,
+    freshnessMeta,
+    marketMultiplier,
+    amount: Math.max(0, Math.round(baseValue * freshnessMeta.multiplier * channelMultiplier)),
+  };
+}
+
+function buildCatchCandidates({ locationItem, bait, trap, satisfaction = 1, placementQuality = 'stable', weatherRarityModifier = 1, random = Math.random }) {
+  const qualityRarity = { perfect:1.16, stable:1, unstable:.9 }[placementQuality] ?? 1;
+  return locationItem.species.map((speciesId, index) => {
+    const speciesItem = getSpecies(speciesId);
+    let weight = { common:50, uncommon:28, rare:11, epic:3 }[speciesItem.rarity] ?? 10;
+    const tagMatches = speciesItem.tags.filter((tag) => bait.tags.includes(tag)).length;
+    const trapMatches = speciesItem.tags.filter((tag) => trap.preferredTags?.includes(tag)).length;
+    weight *= 1 + tagMatches * .52 + trapMatches * .4;
+    if (bait.tags.includes('rare') && ['rare','epic'].includes(speciesItem.rarity)) weight *= 1.45;
+    if (bait.tags.includes('deep') && speciesItem.tags.includes('deep')) weight *= 1.5;
+    if (['rare','epic'].includes(speciesItem.rarity)) weight *= qualityRarity * weatherRarityModifier;
+    weight *= 1 + Math.max(0, satisfaction - 1) * (speciesItem.rarity === 'epic' ? 1.45 : speciesItem.rarity === 'rare' ? .9 : .22);
+    weight *= trap.lure ?? 1;
+    weight *= .94 + random() * .12 + index * .0001;
+    return { item:speciesItem, weight };
+  });
+}
+
+export function getSizeGrade(length, speciesItem) {
+  const ratio = (length - speciesItem.minLength) / Math.max(1, speciesItem.maxLength - speciesItem.minLength);
+  if (ratio >= .94) return 'record';
+  if (ratio >= .78) return 'xl';
+  if (ratio >= .55) return 'large';
+  if (ratio < .24) return 'small';
+  return 'normal';
+}
+
+export const SIZE_GRADES = {
+  small: { label:'소형', multiplier:.86 },
+  normal: { label:'일반', multiplier:1 },
+  large: { label:'대형', multiplier:1.18 },
+  xl: { label:'특대', multiplier:1.38 },
+  record: { label:'기록급', multiplier:1.72 },
+};
+
+export function generateCatchBatch({
+  locationItem,
+  trap,
+  bait,
+  seed,
+  satisfaction = 1,
+  score = 0,
+  placementQuality = 'stable',
+  weatherRarityModifier = 1,
+  overdueRatio = 0,
+  now = Date.now(),
+}) {
+  const random = mulberry32(seed ?? hashString(`${locationItem.id}-${now}`));
+  const candidates = buildCatchCandidates({ locationItem, bait, trap, satisfaction, placementQuality, weatherRarityModifier, random });
+  const qualityBonus = { perfect:.55, stable:.22, unstable:-.15 }[placementQuality] ?? 0;
+  const capacity = trap.capacity;
+  const unitTarget = clamp(1 + Math.floor(random() * (capacity + .5) + qualityBonus + Math.max(0, satisfaction - 1) * 2), 1, capacity);
+  const uniqueTarget = clamp(1 + Math.floor(random() * Math.min(4, unitTarget)), 1, Math.min(4, unitTarget));
+  const picked = [];
+  let remaining = unitTarget;
+  for (let index = 0; index < uniqueTarget && remaining > 0; index += 1) {
+    let chosen = weightedChoice(candidates.filter((entry) => !picked.some((item) => item.speciesId === entry.item.id)), random);
+    if (!chosen) chosen = weightedChoice(candidates, random);
+    const slotsLeft = uniqueTarget - index;
+    const maxQuantity = Math.max(1, remaining - (slotsLeft - 1));
+    const quantity = index === uniqueTarget - 1 ? remaining : clamp(1 + Math.floor(random() * Math.min(3, maxQuantity)), 1, maxQuantity);
+    remaining -= quantity;
+    const qualityBoost = clamp((satisfaction - 1) * .28 + score / 16_000 + (placementQuality === 'perfect' ? .06 : 0), 0, .32);
+    const lengthRatio = clamp(.14 + random() * .72 + qualityBoost, 0, 1);
+    const length = roundTo(lerp(chosen.minLength, chosen.maxLength, lengthRatio), 1);
+    const normalized = length / chosen.maxLength;
+    const weight = roundTo(Math.max(.04, length * length * chosen.weightFactor * (.84 + random() * .34) / 10), 2);
+    const grade = getSizeGrade(length, chosen);
+    const staleMultiplier = clamp(1 - Math.max(0, overdueRatio) * .18, .62, 1);
+    const baseValue = Math.round(chosen.basePrice * RARITIES[chosen.rarity].multiplier * SIZE_GRADES[grade].multiplier * satisfaction * quantity * staleMultiplier);
+    picked.push({
+      id:`catch-${seed}-${index}`,
+      speciesId:chosen.id,
+      quantity,
+      length,
+      weight,
+      grade,
+      baseValue,
+      value:baseValue,
+      caughtAt:new Date(now).toISOString(),
+      locationId:locationItem.id,
+      trapId:trap.id,
+      baitId:bait.id,
+      satisfaction:roundTo(satisfaction, 2),
+      score:Math.round(score),
+    });
+  }
+  return picked;
+}
+
+export function salvageCatchBatch(items, factor = .5, random = Math.random) {
+  const clones = items.map((item) => ({ ...item }));
+  const totalUnits = clones.reduce((sum, item) => sum + item.quantity, 0);
+  const keepUnits = totalUnits ? Math.max(1, Math.floor(totalUnits * clamp(factor, 0, 1))) : 0;
+  let toLose = totalUnits - keepUnits;
+  const order = [...clones].sort((a, b) => (b.weight * b.quantity) - (a.weight * a.quantity) + (random() - .5));
+  for (const item of order) {
+    if (toLose <= 0) break;
+    const lost = Math.min(item.quantity, toLose);
+    item.quantity -= lost;
+    item.baseValue = Math.round(item.baseValue * (item.quantity / Math.max(1, item.quantity + lost)));
+    item.value = item.baseValue;
+    toLose -= lost;
+  }
+  const kept = clones.filter((item) => item.quantity > 0);
+  return { kept, lostCount:totalUnits - kept.reduce((sum, item) => sum + item.quantity, 0) };
+}
+
+export const xpRequiredForLevel = (level) => 80 + Math.max(0, level - 1) * 55;
+export function applyXp(profile, amount) {
+  let level = profile.level;
+  let xp = profile.xp + Math.max(0, amount);
+  let levelUps = 0;
+  while (xp >= xpRequiredForLevel(level)) {
+    xp -= xpRequiredForLevel(level);
+    level += 1;
+    levelUps += 1;
+  }
+  return { ...profile, level, xp, levelUps };
+}
+
+export function getRepairCost(currentDurability, maxDurability) {
+  const missing = Math.max(0, maxDurability - currentDurability);
+  return Math.ceil(missing * 38 / 10) * 10;
+}
+
+const buildStarterQuests = () => Object.fromEntries(QUESTS.map((quest) => [quest.id, { progress:0, claimed:false }]));
+const buildStarterTraps = () => Object.fromEntries(TRAPS.map((trap, index) => [trap.id, { owned:index === 0, durability:index === 0 ? trap.maxDurability - 1 : trap.maxDurability }]));
+const buildStarterBaits = () => Object.fromEntries(BAITS.map((bait, index) => [bait.id, index === 0 ? 6 : 0]));
+const buildBoat = () => ({ winch:0, rack:1, sonar:0, cooler:0, hull:0, engine:1 });
+
+export function createInitialState() {
+  return {
+    version:2,
+    profile:{ name:'귀향 어부', level:1, xp:0, coins:4800, income:0, day:1, seasonIndex:1, weatherIndex:0, totalCatches:0, bestCombo:0, perfectPulls:0, deployments:0, successfulRetrievals:0, citySales:0 },
+    selection:{ locationId:LOCATIONS[0].id, trapId:TRAPS[0].id, baitId:BAITS[0].id },
+    boat:buildBoat(),
+    traps:buildStarterTraps(),
+    baits:buildStarterBaits(),
+    activeTraps:[],
+    inventory:[],
+    collection:{},
+    quests:buildStarterQuests(),
+    dailyQuestDay:1,
+    dailyQuestIds:getDailyQuestIds(1),
+    stats:{ sunsetRetrievals:0 },
+    story:{ stepIndex:1, history:['homecoming'], completed:false },
+    settings:{ sound:true, vibration:true, reducedMotion:false, tutorialSeen:false, notificationPrompted:false },
+  };
+}
+
+function normalizeInventoryItem(item) {
+  return {
+    ...item,
+    grade:item.grade ?? 'normal',
+    baseValue:item.baseValue ?? item.value ?? 0,
+    value:item.value ?? item.baseValue ?? 0,
+    caughtAt:item.caughtAt ?? new Date().toISOString(),
+  };
+}
+
+export function migrateState(raw) {
+  const base = createInitialState();
+  if (!raw || typeof raw !== 'object') return base;
+  const oldProfile = raw.profile ?? {};
+  return {
+    ...base,
+    ...raw,
+    version:2,
+    profile:{ ...base.profile, ...oldProfile, deployments:oldProfile.deployments ?? oldProfile.voyages ?? 0 },
+    selection:{ ...base.selection, ...(raw.selection ?? {}) },
+    boat:{ ...base.boat, ...(raw.boat ?? {}) },
+    traps:{ ...base.traps, ...(raw.traps ?? {}) },
+    baits:{ ...base.baits, ...(raw.baits ?? {}) },
+    quests:{ ...base.quests, ...(raw.quests ?? {}) },
+    dailyQuestDay:Number(raw.dailyQuestDay ?? raw.profile?.day ?? 1),
+    dailyQuestIds:Array.isArray(raw.dailyQuestIds) && raw.dailyQuestIds.length ? raw.dailyQuestIds : getDailyQuestIds(raw.profile?.day ?? 1),
+    stats:{ ...base.stats, ...(raw.stats ?? {}) },
+    story:{ ...base.story, ...(raw.story ?? {}) },
+    settings:{ ...base.settings, ...(raw.settings ?? {}) },
+    activeTraps:Array.isArray(raw.activeTraps) ? raw.activeTraps : [],
+    inventory:Array.isArray(raw.inventory) ? raw.inventory.map(normalizeInventoryItem) : [],
+    collection:raw.collection && typeof raw.collection === 'object' ? raw.collection : {},
+  };
+}
+
+function questAdd(state, type, amount, predicate = () => true) {
+  for (const quest of QUESTS) {
+    const questState = state.quests[quest.id];
+    if (!state.dailyQuestIds?.includes(quest.id)) continue;
+    if (!questState || questState.claimed || quest.type !== type || !predicate(quest)) continue;
+    questState.progress = clamp(questState.progress + amount, 0, quest.target);
+  }
+}
+
+function syncStory(state, event = {}) {
+  let guard = 0;
+  while (!state.story.completed && guard < STORY_STEPS.length) {
+    const step = STORY_STEPS[state.story.stepIndex];
+    if (!step) { state.story.completed = true; break; }
+    let complete = false;
+    if (step.id === 'first-deploy') complete = event.type === 'deploy' || state.profile.deployments > 0;
+    if (step.id === 'first-catch') complete = (event.type === 'retrieval' && event.items?.length > 0) || state.profile.totalCatches > 0;
+    if (step.id === 'repair-winch') complete = state.boat.winch >= 1;
+    if (step.id === 'second-slot') complete = state.boat.rack >= 2;
+    if (step.id === 'sunset-route') complete = (event.type === 'retrieval' && event.locationId === 'sunset-reef') || (state.stats?.sunsetRetrievals ?? 0) > 0;
+    if (step.id === 'legacy') complete = event.items?.some((item) => ['rare','epic'].includes(getSpecies(item.speciesId)?.rarity)) || Object.keys(state.collection).some((id) => ['rare','epic'].includes(getSpecies(id)?.rarity));
+    if (!complete) break;
+    if (!state.story.history.includes(step.id)) state.story.history.push(step.id);
+    state.story.stepIndex += 1;
+    guard += 1;
+    if (state.story.stepIndex >= STORY_STEPS.length) state.story.completed = true;
+  }
+}
+
+export class GameStore extends EventTarget {
+  constructor(storage = globalThis.localStorage) {
+    super();
+    this.storage = storage;
+    this.state = this.load();
+  }
+
+  load() {
+    try {
+      let rawText = this.storage?.getItem(SAVE_KEY);
+      if (!rawText) {
+        for (const key of LEGACY_SAVE_KEYS) {
+          rawText = this.storage?.getItem(key);
+          if (rawText) break;
+        }
+      }
+      return rawText ? migrateState(JSON.parse(rawText)) : createInitialState();
+    } catch {
+      return createInitialState();
+    }
+  }
+
+  save() {
+    try { this.storage?.setItem(SAVE_KEY, JSON.stringify(this.state)); } catch { /* storage can be unavailable */ }
+    this.dispatchEvent(new CustomEvent('change', { detail:this.state }));
+  }
+
+  mutate(recipe) {
+    recipe(this.state);
+    this.save();
+    return this.state;
+  }
+
+  reset() {
+    this.state = createInitialState();
+    this.save();
+  }
+
+  get selectedLocation() { return getLocation(this.state.selection.locationId); }
+  get selectedTrap() { return getTrap(this.state.selection.trapId); }
+  get selectedBait() { return getBait(this.state.selection.baitId); }
+  get weather() { return WEATHER_TYPES[this.state.profile.weatherIndex % WEATHER_TYPES.length]; }
+  get season() { return SEASONS[this.state.profile.seasonIndex % SEASONS.length]; }
+  get slotCount() { return getSlotCount(this.state.boat.rack); }
+  get inventoryCapacity() { return getInventoryCapacity(this.state.boat.cooler); }
+
+  setSelection(type, id) {
+    const key = `${type}Id`;
+    this.mutate((state) => { state.selection[key] = id; });
+  }
+
+  canUseLocation(locationId) {
+    const locationItem = getLocation(locationId);
+    return Boolean(locationItem && this.state.profile.level >= locationItem.unlockLevel && this.state.boat.engine >= locationItem.engineLevel);
+  }
+
+  canUseTrap(trapId) {
+    const trapState = this.state.traps[trapId];
+    return Boolean(trapState?.owned && trapState.durability > 0);
+  }
+
+  canDeploy() {
+    const baitCount = this.state.baits[this.selectedBait.id] ?? 0;
+    const usedSlots = new Set(this.state.activeTraps.map((item) => item.slot));
+    const freeSlot = Array.from({ length:this.slotCount }, (_, index) => index + 1).find((slot) => !usedSlots.has(slot));
+    return {
+      ok:Boolean(freeSlot && baitCount > 0 && this.canUseLocation(this.selectedLocation.id) && this.canUseTrap(this.selectedTrap.id)),
+      freeSlot,
+      reason:!freeSlot ? '사용 가능한 통발 슬롯이 가득 찼어요.'
+        : baitCount <= 0 ? '선택한 미끼가 없어요. 어시장에서 구입하세요.'
+          : !this.canUseLocation(this.selectedLocation.id) ? `레벨 또는 엔진 조건이 부족해 ${this.selectedLocation.name}에 갈 수 없어요.`
+            : !this.canUseTrap(this.selectedTrap.id) ? '통발을 수리하거나 구입해야 해요.' : '',
+    };
+  }
+
+  deployTrap({ placementQuality = 'stable', now = Date.now(), seed = Math.floor(Math.random() * 0xffffffff) } = {}) {
+    const check = this.canDeploy();
+    if (!check.ok) return check;
+    const locationItem = this.selectedLocation;
+    const firstDeployment = this.state.profile.deployments === 0;
+    const duration = getWaitDuration(locationItem, this.state.boat.engine, placementQuality, firstDeployment);
+    const active = {
+      id:`trapline-${now}-${check.freeSlot}`,
+      slot:check.freeSlot,
+      locationId:locationItem.id,
+      trapId:this.selectedTrap.id,
+      baitId:this.selectedBait.id,
+      depth:locationItem.depth,
+      deployedAt:now,
+      readyAt:now + duration,
+      placementQuality,
+      seed:seed >>> 0,
+      status:'active',
+    };
+    this.mutate((state) => {
+      state.baits[active.baitId] = Math.max(0, (state.baits[active.baitId] ?? 0) - 1);
+      state.activeTraps.push(active);
+      state.profile.deployments += 1;
+      questAdd(state, 'deploy', 1);
+      syncStory(state, { type:'deploy' });
+    });
+    return { ok:true, active, duration };
+  }
+

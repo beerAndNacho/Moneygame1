@@ -1,0 +1,182 @@
+    ['trapline','트랩라인','trapline'],
+    ['market','어시장','market'],
+    ['collection','도감','book'],
+    ['village','마을','village'],
+  ];
+  return `<nav class="bottom-nav" aria-label="주 메뉴">${entries.map(([view,label,iconName]) => `<button class="nav-item ${active === view ? 'active' : ''}" data-action="navigate" data-view="${view}">${icon(iconName)}<span>${label}</span>${view === 'trapline' && readyCount ? `<i>${readyCount}</i>` : ''}${view === 'village' && questCount ? `<i>${questCount}</i>` : ''}</button>`).join('')}</nav>`;
+}
+
+function renderScreen(content, active = currentView, title = '항구') {
+  ocean.setMode('harbor');
+  app.innerHTML = `<div class="screen-shell">${renderTopHud(title)}<div class="screen-scroll">${content}</div>${renderBottomNav(active)}</div>`;
+  app.className = `app view-${active}`;
+}
+
+function route(view) {
+  runtime = null;
+  currentView = view;
+  closeModal();
+  renderCurrentView();
+}
+
+function trapStatusCard(activeTrap, compact = false) {
+  const location = getLocation(activeTrap.locationId);
+  const trap = getTrap(activeTrap.trapId);
+  const bait = getBait(activeTrap.baitId);
+  const status = getTrapStatus(activeTrap);
+  const meta = STATUS_META[status];
+  const progress = getTrapProgress(activeTrap);
+  const qualityLabel = { perfect:'완벽 설치', stable:'안정 설치', unstable:'불안정 설치' }[activeTrap.placementQuality] ?? '안정 설치';
+  if (compact) {
+    return `<article class="compact-trap ${meta.className}">
+      <div class="compact-buoy"><span></span><i></i></div>
+      <div class="compact-copy"><small>${activeTrap.slot}번 라인 · ${html(trap.name)}</small><b>${html(location.name)}</b><div class="thin-progress"><i style="width:${Math.round(progress * 100)}%"></i></div></div>
+      <div class="compact-time"><span>${meta.label}</span><b data-countdown="${activeTrap.id}">${['ready','stale'].includes(status) ? '지금 회수' : formatDuration(getRemainingMs(activeTrap))}</b></div>
+      ${['ready','stale'].includes(status) ? `<button class="mini-cta" data-action="start-retrieve" data-id="${activeTrap.id}">회수</button>` : ''}
+    </article>`;
+  }
+  return `<article class="trap-slot ${meta.className}">
+    <header><span class="slot-number">${activeTrap.slot}</span><div><small>${meta.label.toUpperCase()}</small><h3>${html(location.name)}</h3></div><span class="quality ${activeTrap.placementQuality}">${qualityLabel}</span></header>
+    <div class="slot-sea"><span class="buoy"><i></i></span><span class="rope" style="height:${Math.round(35 + progress * 50)}%"></span><span class="trap-shape">${icon('trapline')}</span></div>
+    <div class="slot-stats"><span><small>통발</small><b>${html(trap.name)}</b></span><span><small>미끼</small><b>${html(bait.name)}</b></span><span><small>수심</small><b>${location.depth}m</b></span></div>
+    <div class="slot-progress"><i style="width:${Math.round(progress * 100)}%"></i></div>
+    <footer><div><small>${meta.label}</small><b data-countdown="${activeTrap.id}">${['ready','stale'].includes(status) ? '통발이 크게 흔들립니다' : formatDuration(getRemainingMs(activeTrap))}</b></div>${['ready','stale'].includes(status) ? `<button class="slot-cta" data-action="start-retrieve" data-id="${activeTrap.id}">회수 시작</button>` : `<button class="slot-cta muted" disabled>포획 중</button>`}</footer>
+  </article>`;
+}
+
+function renderHarbor() {
+  const state = store.state;
+  const active = [...state.activeTraps].sort((a, b) => a.slot - b.slot);
+  const ready = active.filter((trap) => ['ready','stale'].includes(getTrapStatus(trap)));
+  const story = currentStoryStep();
+  const deployCheck = store.canDeploy();
+  const firstReady = ready[0];
+  const discovered = Object.keys(state.collection).length;
+  const content = `
+    <section class="harbor-hero">
+      <div class="kicker">TRAPLINE UPDATE</div>
+      <h1>파도 아래</h1>
+      <p>여러 해역에 통발을 놓고, 기다림 끝의 바다를 건져 올리세요.</p>
+      <div class="hero-stats"><span>${icon('trapline')}<b>${active.length}/${store.slotCount}</b><small>설치</small></span><span>${icon('box')}<b>${state.inventory.length}/${store.inventoryCapacity}</b><small>창고</small></span><span>${icon('sonar')}<b>${discovered}/${SPECIES.length}</b><small>도감</small></span></div>
+    </section>
+
+    ${story ? `<button class="story-strip" data-action="navigate" data-view="village"><span>${String(state.story.stepIndex + 1).padStart(2, '0')}</span><div><small>옛 통발 항로 복원</small><b>${html(story.title)}</b><p>${html(story.description)}</p></div>${icon('arrow')}</button>` : `<div class="story-strip complete"><span>✓</span><div><small>챕터 1 완료</small><b>옛 통발 항로를 다시 열었습니다</b></div></div>`}
+
+    <section class="section-block">
+      <header class="section-heading"><div><small>TRAPLINE</small><h2>바다에 놓인 통발</h2></div><button data-action="navigate" data-view="trapline">전체 보기</button></header>
+      <div class="compact-list">${active.length ? active.slice(0, 3).map((trap) => trapStatusCard(trap, true)).join('') : `<div class="empty-card"><span>${icon('trapline')}</span><h3>설치된 통발이 없습니다</h3><p>해역, 통발, 미끼를 조합해 첫 트랩라인을 만드세요.</p></div>`}</div>
+    </section>
+
+    <div class="harbor-actions">
+      ${firstReady ? `<button class="primary-action ready" data-action="start-retrieve" data-id="${firstReady.id}"><span>${icon('trapline')}</span><div><b>통발 회수하기</b><small>${ready.length}개 통발이 기다리고 있습니다</small></div>${icon('arrow')}</button>` : `<button class="primary-action" data-action="open-setup" ${deployCheck.ok ? '' : 'disabled'}><span>${icon('anchor')}</span><div><b>새 통발 설치</b><small>${deployCheck.ok ? `${store.slotCount - active.length}개 슬롯 사용 가능` : html(deployCheck.reason)}</small></div>${icon('arrow')}</button>`}
+      <button class="secondary-action" data-action="navigate" data-view="market"><span>${icon('market')}</span><div><b>오늘 시세 확인</b><small>${MARKET_CATEGORIES.find((category) => category.id === getMarketSnapshot(state.profile.day).hotCategoryId)?.label} 가격 강세</small></div></button>
+    </div>`;
+  renderScreen(content, 'harbor', `${weather().label} · 항구`);
+}
+
+function renderTrapline() {
+  const state = store.state;
+  const activeBySlot = new Map(state.activeTraps.map((trap) => [trap.slot, trap]));
+  const slots = [];
+  for (let slot = 1; slot <= 3; slot += 1) {
+    if (slot > store.slotCount) {
+      slots.push(`<article class="trap-slot locked"><header><span class="slot-number">${slot}</span><div><small>LOCKED</small><h3>거치대 강화 필요</h3></div>${icon('lock')}</header><div class="locked-copy"><p>마을 조선소에서 통발 거치대를 강화하면 동시 설치 슬롯이 늘어납니다.</p><button data-action="navigate" data-view="village">조선소 가기</button></div></article>`);
+      continue;
+    }
+    const active = activeBySlot.get(slot);
+    if (active) slots.push(trapStatusCard(active));
+    else slots.push(`<article class="trap-slot empty"><header><span class="slot-number">${slot}</span><div><small>EMPTY LINE</small><h3>비어 있는 통발 라인</h3></div></header><div class="slot-sea empty"><span class="buoy ghost"><i></i></span><span class="dashed-rope"></span></div><div class="empty-slot-copy"><p>새 통발을 설치해 이 라인을 운용하세요.</p><button class="slot-cta" data-action="open-setup">통발 설치</button></div></article>`);
+  }
+  const content = `<section class="page-heading"><small>MY TRAPLINE</small><h1>통발 운용 현황</h1><p>브라우저를 닫아도 바다의 시간은 계속 흐릅니다.</p></section><div class="trap-grid">${slots.join('')}</div>`;
+  renderScreen(content, 'trapline', '트랩라인');
+}
+
+function selectionCard(kind, item, selected, locked, meta) {
+  return `<button class="selection-card ${selected ? 'selected' : ''} ${locked ? 'locked' : ''}" data-action="select-${kind}" data-id="${item.id}" ${locked ? 'disabled' : ''}><span class="selection-symbol">${kind === 'location' ? icon('anchor') : kind === 'trap' ? icon('trapline') : icon('bait')}</span><div><small>${selected ? '선택됨' : locked ? '잠김' : '선택 가능'}</small><b>${html(item.name)}</b><p>${html(item.subtitle)}</p><i>${html(meta)}</i></div>${locked ? icon('lock') : selected ? icon('check') : icon('arrow')}</button>`;
+}
+
+function sonarForecast(location, bait) {
+  const level = store.state.boat.sonar;
+  if (level <= 0) return '탐지기 없음 · 실제 결과는 회수 후 공개';
+  const candidates = location.species.map(getSpecies).filter(Boolean);
+  const categories = [...new Set(candidates.map((item) => MARKET_CATEGORIES.find((cat) => cat.id === item.category)?.label).filter(Boolean))];
+  if (level === 1) return `${categories.slice(0, 2).join('·')} 반응 감지`;
+  const matching = candidates.filter((item) => item.tags.some((tag) => bait.tags.includes(tag)));
+  if (level === 2) return `${matching.slice(0, 3).map((item) => item.name).join('·') || categories.join('·')} 가능성 높음`;
+  const rare = matching.filter((item) => ['rare','epic'].includes(item.rarity));
+  return `${matching.slice(0, 3).map((item) => item.name).join('·')} · 희귀 후보 ${rare.length}종`;
+}
+
+function renderSetup() {
+  currentView = 'setup';
+  ocean.setMode('harbor');
+  const state = store.state;
+  const selectedLocation = store.selectedLocation;
+  const selectedTrap = store.selectedTrap;
+  const selectedBait = store.selectedBait;
+  const deployCheck = store.canDeploy();
+  const locationCards = LOCATIONS.map((location) => {
+    const locked = !store.canUseLocation(location.id);
+    const req = locked ? `LV.${location.unlockLevel} · 엔진 ${location.engineLevel}` : `수심 ${location.depth}m · 약 ${formatDuration(location.waitSeconds * 1000)}`;
+    return selectionCard('location', location, state.selection.locationId === location.id, locked, req);
+  }).join('');
+  const trapCards = TRAPS.map((trap) => {
+    const owned = state.traps[trap.id];
+    const locked = !owned?.owned || owned.durability <= 0 || state.activeTraps.some((active) => active.trapId === trap.id);
+    const meta = owned?.owned ? `용량 ${trap.capacity} · 내구 ${Math.round(owned.durability)}/${trap.maxDurability}${state.activeTraps.some((active) => active.trapId === trap.id) ? ' · 설치 중' : ''}` : `상점 ${formatCoins(trap.price)}조개`;
+    return selectionCard('trap', trap, state.selection.trapId === trap.id, locked, meta);
+  }).join('');
+  const baitCards = BAITS.map((bait) => {
+    const count = state.baits[bait.id] ?? 0;
+    return selectionCard('bait', bait, state.selection.baitId === bait.id, count <= 0, `보유 ${count}개 · ${formatCoins(bait.price)}조개`);
+  }).join('');
+  const content = `<div class="setup-shell">
+    ${renderTopHud('통발 설치', 'close-setup')}
+    <div class="setup-scroll">
+      <section class="page-heading compact"><small>DEPLOYMENT PLAN</small><h1>출항 준비</h1><p>해역과 장비의 조합이 포획 후보와 위험도를 바꿉니다.</p></section>
+      <details class="setup-group" open><summary><span>01</span><div><small>LOCATION</small><b>${html(selectedLocation.name)}</b></div>${icon('arrow')}</summary><div class="selection-list">${locationCards}</div></details>
+      <details class="setup-group"><summary><span>02</span><div><small>TRAP</small><b>${html(selectedTrap.name)}</b></div>${icon('arrow')}</summary><div class="selection-list">${trapCards}</div></details>
+      <details class="setup-group"><summary><span>03</span><div><small>BAIT</small><b>${html(selectedBait.name)}</b></div>${icon('arrow')}</summary><div class="selection-list">${baitCards}</div></details>
+      <section class="forecast-card">
+        <header><div><small>SONAR FORECAST</small><h2>예상 조업 정보</h2></div>${icon('sonar')}</header>
+        <p>${html(sonarForecast(selectedLocation, selectedBait))}</p>
+        <div class="forecast-grid"><span><small>대기 시간</small><b>${state.profile.deployments === 0 ? '튜토리얼 15초' : `약 ${formatDuration(selectedLocation.waitSeconds * 1000)}`}</b></span><span><small>예상 포획</small><b>1~${selectedTrap.capacity}마리</b></span><span><small>물살</small><b>${Math.round(selectedLocation.current * weather().currentModifier * 10)}/10</b></span><span><small>위험</small><b>${Math.round(selectedLocation.danger * 100)}%</b></span></div>
+      </section>
+    </div>
+    <footer class="setup-footer"><button class="deploy-plan-button" data-action="start-placement" ${deployCheck.ok ? '' : 'disabled'}><span>${icon('anchor')}</span><div><b>설치 지점으로 출항</b><small>${deployCheck.ok ? `${store.slotCount - state.activeTraps.length}개 라인 운용 가능` : html(deployCheck.reason)}</small></div>${icon('arrow')}</button></footer>
+  </div>`;
+  app.innerHTML = content;
+  app.className = 'app view-setup';
+}
+
+function renderMarketCard(item) {
+  const species = getSpecies(item.speciesId);
+  const freshness = getFreshness(item, store.state.boat.cooler);
+  const freshMeta = getFreshnessMeta(freshness);
+  const local = getSaleQuote(item, { day:store.state.profile.day, coolerLevel:store.state.boat.cooler, channel:'village' }).amount;
+  const cityQuote = getSaleQuote(item, { day:store.state.profile.day, coolerLevel:store.state.boat.cooler, channel:'city' }).amount;
+  const city = Math.max(0, cityQuote - 80);
+  return `<article class="inventory-card"><div class="species-token rarity-${species.rarity}">${speciesGlyph(species)}</div><div class="inventory-copy"><div><span class="rarity rarity-${species.rarity}">${RARITIES[species.rarity].label}</span><span class="grade">${SIZE_GRADES[item.grade]?.label ?? '일반'}</span></div><h3>${html(species.name)} <small>×${item.quantity}</small></h3><p>${item.length.toFixed(1)}cm · ${formatWeight(item.weight)} · <i class="freshness ${freshMeta.className}">${freshMeta.label} ${freshness}%</i></p></div><div class="price-buttons"><button data-action="sell-item" data-id="${item.id}" data-channel="village" class="${local >= city ? 'best' : ''}"><small>섬 직거래</small><b>${formatCoins(local)}</b></button><button data-action="sell-item" data-id="${item.id}" data-channel="city" class="${city > local ? 'best' : ''}"><small>도시 경매</small><b>${formatCoins(city)}</b></button></div></article>`;
+}
+
+function renderMarket() {
+  const state = store.state;
+  const market = getMarketSnapshot(state.profile.day);
+  const inventory = state.inventory;
+  const bestTotal = inventory.reduce((sum, item) => {
+    const local = getSaleQuote(item, { day:state.profile.day, coolerLevel:state.boat.cooler, channel:'village' }).amount;
+    const city = Math.max(0, getSaleQuote(item, { day:state.profile.day, coolerLevel:state.boat.cooler, channel:'city' }).amount - 80);
+    return sum + Math.max(local, city);
+  }, 0);
+  const content = `<section class="page-heading"><small>DAILY MARKET</small><h1>${state.profile.day}일차 어시장</h1><p>매일 수요가 달라집니다. 신선도가 떨어지기 전에 가장 좋은 판매처를 고르세요.</p></section>
+    <section class="market-board">${MARKET_CATEGORIES.map((category) => { const multiplier = market.prices[category.id]; const percent = Math.round((multiplier - 1) * 100); return `<article class="${market.hotCategoryId === category.id ? 'hot' : ''}"><span>${category.icon}</span><small>${category.label}</small><b>${percent >= 0 ? '+' : ''}${percent}%</b></article>`; }).join('')}</section>
+    <section class="section-block"><header class="section-heading"><div><small>WAREHOUSE</small><h2>보관 중인 어획물</h2></div><span>${inventory.length}/${store.inventoryCapacity}</span></header>${inventory.length ? `<div class="inventory-list">${inventory.map(renderMarketCard).join('')}</div><button class="wide-cta" data-action="sell-all-best">품목별 최고가 판매 · 약 ${formatCoins(bestTotal)}조개</button>` : `<div class="empty-card"><span>${icon('box')}</span><h3>창고가 비어 있습니다</h3><p>준비된 통발을 회수하면 판매처별 가격을 비교할 수 있습니다.</p></div>`}</section>
+    <section class="section-block"><header class="section-heading"><div><small>BAIT SHOP</small><h2>미끼 보급소</h2></div></header><div class="shop-list">${BAITS.map((bait) => `<article class="shop-row"><span>${icon('bait')}</span><div><small>보유 ${state.baits[bait.id] ?? 0}개</small><b>${html(bait.name)}</b><p>${html(bait.subtitle)}</p></div><button data-action="buy-bait" data-id="${bait.id}">3개 · ${formatCoins(bait.price * 3)}</button></article>`).join('')}</div></section>`;
+  renderScreen(content, 'market', '어시장');
+}
+
+function renderCollection() {
+  const state = store.state;
+  const discovered = Object.keys(state.collection).length;
+  const content = `<section class="page-heading"><small>MARINE JOURNAL</small><h1>바다 생물 도감</h1><p>발견한 생물의 최대 크기와 최고 가치를 기록합니다.</p></section>
+    <section class="collection-summary"><div><b>${discovered}</b><span>/ ${SPECIES.length}종</span></div><div class="collection-progress"><i style="width:${Math.round(discovered / SPECIES.length * 100)}%"></i></div><p>${discovered < 10 ? '연안 생물을 더 조사해보세요.' : discovered < 24 ? '더 깊은 해역에 희귀 생물이 기다립니다.' : '침몰선의 전설 생물까지 얼마 남지 않았습니다.'}</p></section>

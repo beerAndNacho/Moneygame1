@@ -1,0 +1,239 @@
+export const SAVE_KEY = 'moneygame1-trapline-v2';
+export const LEGACY_SAVE_KEYS = ['trap-night-save-v1', 'moneygame1-save-v1'];
+
+export const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+export const lerp = (a, b, t) => a + (b - a) * t;
+export const roundTo = (value, digits = 0) => {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+};
+export const formatCoins = (value) => Math.max(0, Math.round(value)).toLocaleString('ko-KR');
+export const formatWeight = (kg) => (kg >= 1 ? `${kg.toFixed(2)}kg` : `${Math.round(kg * 1000)}g`);
+
+export function hashString(value) {
+  let hash = 2166136261;
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+export function mulberry32(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = t;
+    r = Math.imul(r ^ (r >>> 15), r | 1);
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function weightedChoice(items, random = Math.random) {
+  const total = items.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
+  if (!total) return items[0]?.item ?? null;
+  let cursor = random() * total;
+  for (const entry of items) {
+    cursor -= Math.max(0, entry.weight);
+    if (cursor <= 0) return entry.item;
+  }
+  return items.at(-1)?.item ?? null;
+}
+
+const location = (id, name, subtitle, depth, unlockLevel, engineLevel, current, danger, waitSeconds, color, species) => ({
+  id, name, subtitle, depth, unlockLevel, engineLevel, current, danger, waitSeconds, color, species,
+});
+
+export const LOCATIONS = [
+  location('small-breakwater', '작은 방파제', '잔잔한 입문 포인트', 8, 1, 1, .68, .12, 24, '#65c7cb', ['whelk','shore-crab','webfoot-octopus','sea-cucumber','rockfish','scallop','sea-urchin','mussel']),
+  location('rocky-crevice', '갯바위 틈', '바위 사이에 패류가 모인다', 10, 1, 1, .9, .25, 42, '#4faeac', ['shore-crab','blue-crab','abalone','scallop','sea-urchin','mussel','sea-snail','kelp-crab']),
+  location('sunset-reef', '노을 암초', '물살이 빠른 바위 지대', 14, 2, 1, 1.05, .3, 64, '#548fa6', ['abalone','common-octopus','cuttlefish','conger-eel','mantis-shrimp','sea-squirt','hairy-crab','tiger-prawn','sea-bream']),
+  location('blue-channel', '푸른 수로', '큰 놈이 숨어드는 깊은 길', 20, 4, 2, 1.32, .42, 105, '#326d91', ['spiny-lobster','red-snow-crab','giant-octopus','flounder','moray-eel','king-scallop','golden-whelk','squid','cutlassfish','monkfish']),
+  location('wreck-field', '외해 침몰선', '달빛 아래 드러나는 오래된 항로', 28, 6, 3, 1.58, .58, 168, '#24465f', ['red-snow-crab','giant-octopus','moray-eel','golden-whelk','spider-crab','hagfish','lanternfish','giant-isopod','moon-jelly','nautilus']),
+];
+
+export const TRAPS = [
+  { id:'round-wire', name:'철제 원형 통발', subtitle:'무난하고 튼튼하다', capacity:3, maxDurability:48, pullPower:1, stability:1, lure:1, unlockLevel:1, price:0, icon:'▦' },
+  { id:'folding-square', name:'접이식 사각 통발', subtitle:'가볍고 회수가 빠르다', capacity:4, maxDurability:58, pullPower:1.14, stability:.9, lure:1.02, unlockLevel:2, price:5400, icon:'▣' },
+  { id:'shell-basket', name:'패류 바구니 통발', subtitle:'바위 틈 패류에 특화', capacity:5, maxDurability:54, pullPower:.96, stability:1.08, lure:1.12, preferredTags:['shell','slow'], unlockLevel:3, price:9200, icon:'▤' },
+  { id:'reinforced-barrel', name:'강화 원통 통발', subtitle:'깊은 수심에 강하다', capacity:6, maxDurability:78, pullPower:1.08, stability:1.22, lure:1.08, unlockLevel:4, price:13800, icon:'⬡' },
+  { id:'abyss-cage', name:'심해 압력 통발', subtitle:'침몰선의 거물을 노린다', capacity:7, maxDurability:96, pullPower:1.2, stability:1.3, lure:1.22, preferredTags:['deep','rare'], unlockLevel:6, price:28800, icon:'⬢' },
+];
+
+export const BAITS = [
+  { id:'fish-head', name:'생선 머리', subtitle:'갑각류와 문어가 좋아한다', tags:['crab','octopus','eel'], price:220, icon:'◓' },
+  { id:'clam-meat', name:'조갯살', subtitle:'패류와 해삼에 효과적', tags:['shell','slow'], price:310, icon:'◒' },
+  { id:'crab-mix', name:'게살 배합', subtitle:'문어와 고급 어종을 유인', tags:['rare','octopus','fish'], price:520, icon:'✦' },
+  { id:'squid-guts', name:'오징어 내장', subtitle:'깊은 수로의 포식자를 부른다', tags:['deep','eel','rare'], price:760, icon:'≈' },
+  { id:'fermented-shrimp', name:'새우 발효 미끼', subtitle:'게와 새우가 강하게 반응한다', tags:['crab','shrimp'], price:430, icon:'≋' },
+  { id:'seaweed-bundle', name:'해초 묶음', subtitle:'패류와 느린 생물이 모인다', tags:['shell','slow','reef'], price:360, icon:'⌇' },
+  { id:'glow-paste', name:'야광 어분', subtitle:'밤과 심해 희귀종에 효과적', tags:['deep','rare','fish'], price:980, icon:'✧' },
+  { id:'captain-blend', name:'선장의 비밀 배합', subtitle:'모든 어종에 고르게 작용한다', tags:['crab','octopus','shell','fish','deep'], price:1450, icon:'◆' },
+];
+
+export const RARITIES = {
+  common: { label:'일반', multiplier:1, color:'#d9e7e4' },
+  uncommon: { label:'고급', multiplier:1.35, color:'#75e3b3' },
+  rare: { label:'희귀', multiplier:1.9, color:'#72b5ff' },
+  epic: { label:'전설', multiplier:3.2, color:'#db8cff' },
+};
+
+export const MARKET_CATEGORIES = [
+  { id:'crustacean', label:'갑각류', icon:'✣' },
+  { id:'cephalopod', label:'문어류', icon:'♨' },
+  { id:'shellfish', label:'패류', icon:'◉' },
+  { id:'fish', label:'어류', icon:'><' },
+  { id:'deepsea', label:'심해 생물', icon:'✦' },
+];
+
+const species = (id, name, rarity, category, basePrice, minLength, maxLength, weightFactor, tags, icon, quote) => ({
+  id, name, rarity, category, basePrice, minLength, maxLength, weightFactor, tags, icon, quote,
+});
+
+export const SPECIES = [
+  species('whelk','골뱅이','common','shellfish',620,5,11,.018,['shell','slow'],'◉','소면은 필수다. 오늘 저녁은 정해졌다.'),
+  species('shore-crab','돌게','common','crustacean',710,7,15,.022,['crab'],'♣','작아 보여도 집게 힘은 만만치 않다.'),
+  species('webfoot-octopus','주꾸미','common','cephalopod',780,8,18,.019,['octopus'],'♨','통발 구석에서 눈치를 살피고 있다.'),
+  species('sea-cucumber','해삼','common','shellfish',680,9,22,.025,['slow'],'▬','바다 바닥을 천천히 청소하는 생물.'),
+  species('rockfish','쥐노래미','uncommon','fish',1180,12,31,.035,['fish'],'><','암초 틈에서 튀어나온 힘 좋은 녀석.'),
+  species('scallop','가리비','uncommon','shellfish',1040,7,16,.027,['shell'],'◖','껍데기 사이로 푸른빛이 반짝인다.'),
+  species('sea-urchin','보라성게','uncommon','shellfish',1210,6,12,.031,['slow','reef'],'✺','맨손으로 잡기엔 너무 까칠하다.'),
+  species('abalone','전복','rare','shellfish',2450,7,17,.039,['shell','rare','reef'],'◈','바위에 붙어 있던 귀한 손님.'),
+  species('common-octopus','참문어','rare','cephalopod',2860,20,58,.048,['octopus','rare'],'♛','통발 문을 열 방법을 찾는 듯하다.'),
+  species('cuttlefish','갑오징어','rare','cephalopod',2280,15,36,.041,['octopus','fish'],'◆','빛에 따라 몸빛이 빠르게 변한다.'),
+  species('conger-eel','붕장어','uncommon','fish',1640,34,88,.052,['eel','fish'],'〰','줄처럼 길고 힘은 생각보다 세다.'),
+  species('mantis-shrimp','갯가재','uncommon','crustacean',1390,10,24,.028,['crab','shrimp'],'≋','빠른 앞다리 공격을 조심해야 한다.'),
+  species('sea-squirt','멍게','common','shellfish',760,7,16,.031,['slow','reef'],'♟','바다 향을 가득 품은 붉은 주머니.'),
+  species('hairy-crab','털게','rare','crustacean',3320,10,22,.055,['crab','rare'],'✹','거친 털 아래 단단한 껍질이 숨었다.'),
+  species('spiny-lobster','닭새우','epic','deepsea',6900,23,54,.071,['crab','shrimp','deep','rare'],'♜','긴 더듬이가 깊은 바다의 왕관 같다.'),
+  species('red-snow-crab','붉은대게','epic','deepsea',7600,32,78,.086,['crab','deep','rare'],'✸','긴 다리가 통발 밖으로 삐져나온다.'),
+  species('giant-octopus','큰참문어','epic','deepsea',8200,55,130,.11,['octopus','deep','rare'],'♚','통발 전체가 숨을 쉬는 듯 흔들린다.'),
+  species('flounder','도다리','rare','fish',2980,18,47,.054,['fish','deep'],'◁','모래색 몸으로 바닥에 완벽히 숨는다.'),
+  species('moray-eel','곰치','rare','deepsea',3720,50,120,.082,['eel','fish','deep'],'∿','입을 벌린 채 통발 틈을 노려본다.'),
+  species('king-scallop','왕가리비','rare','shellfish',3120,14,28,.061,['shell','deep','rare'],'◕','손바닥보다 큰 껍데기가 묵직하다.'),
+  species('golden-whelk','황금소라','epic','deepsea',9400,11,24,.057,['shell','deep','rare'],'◎','달빛을 머금은 듯 금빛이 흐른다.'),
+  species('mussel','참담치','common','shellfish',540,5,12,.022,['shell','reef'],'◐','바위 냄새를 품은 검은 껍데기.'),
+  species('blue-crab','꽃게','uncommon','crustacean',1680,12,27,.046,['crab','reef'],'✣','푸른 다리가 통발 안에서 분주하다.'),
+  species('tiger-prawn','보리새우','rare','crustacean',2740,14,32,.032,['shrimp','rare'],'⌁','줄무늬 몸이 노을빛에 반짝인다.'),
+  species('squid','살오징어','uncommon','cephalopod',1820,20,48,.043,['octopus','fish','deep'],'⋈','긴 촉수가 미끼를 단단히 감쌌다.'),
+  species('sea-bream','참돔','rare','fish',3460,22,62,.065,['fish','rare','reef'],'▷','붉은 비늘이 수면 아래서 번쩍인다.'),
+  species('sea-snail','큰구슬우렁이','uncommon','shellfish',1360,7,15,.034,['shell','slow','reef'],'@','둥근 껍데기에 모래가 가득 묻었다.'),
+  species('kelp-crab','다시마게','rare','crustacean',2580,9,21,.044,['crab','rare','reef'],'♧','몸에 해초를 붙여 완벽히 위장했다.'),
+  species('cutlassfish','갈치','rare','fish',3240,55,128,.038,['fish','deep','rare'],'╱','은빛 몸이 칼날처럼 번뜩인다.'),
+  species('monkfish','아귀','rare','deepsea',4160,35,92,.096,['fish','deep','rare'],'◙','커다란 입이 통발 절반을 차지한다.'),
+  species('spider-crab','대왕거미게','epic','deepsea',10800,75,188,.125,['crab','deep','rare'],'✥','긴 다리가 침몰선의 철골처럼 얽혔다.'),
+  species('hagfish','먹장어','rare','deepsea',4380,42,96,.058,['eel','deep','rare'],'⌇','미끄러운 몸이 줄 사이로 꿈틀거린다.'),
+  species('lanternfish','샛비늘치','epic','deepsea',8800,8,19,.025,['fish','deep','rare'],'✧','몸 옆의 작은 빛이 별자리처럼 켜진다.'),
+  species('giant-isopod','대왕등각류','epic','deepsea',12600,24,48,.104,['crab','deep','rare'],'▰','갑옷 같은 몸이 묵직하게 웅크렸다.'),
+  species('moon-jelly','달해파리','rare','deepsea',3960,18,46,.02,['slow','deep','rare'],'☾','투명한 몸 안에 달무늬가 떠 있다.'),
+  species('nautilus','앵무조개','epic','deepsea',14800,14,31,.072,['shell','deep','rare'],'◉','오래된 바다의 시간이 나선 속에 감겼다.'),
+];
+
+export const BOAT_UPGRADES = [
+  { id:'winch', name:'전동 윈치', icon:'⚙', maxLevel:3, costs:[0,2400,7200,16800], effects:['수동 회수','회수력 +9%','회수력 +18%','회수력 +30%'] },
+  { id:'rack', name:'통발 거치대', icon:'▥', maxLevel:3, costs:[0,3500,12000,26000], effects:['슬롯 1개','슬롯 1개','슬롯 2개','슬롯 3개'] },
+  { id:'sonar', name:'어군 탐지기', icon:'⌁', maxLevel:3, costs:[0,3800,9800,21000], effects:['예측 없음','어종 분류 예측','희귀도 예측','정밀 포획 예측'] },
+  { id:'cooler', name:'냉장 보관함', icon:'▣', maxLevel:3, costs:[0,2200,6800,15400], effects:['보관 8칸','보관 14칸','보관 20칸','보관 28칸'] },
+  { id:'hull', name:'선체 보강', icon:'◇', maxLevel:3, costs:[0,3000,8400,19000], effects:['기본 선체','위험 피해 -10%','위험 피해 -20%','위험 피해 -32%'] },
+  { id:'engine', name:'선외기 엔진', icon:'➤', maxLevel:3, costs:[0,4200,12800,29000], effects:['연안 해역','연안 해역','푸른 수로','외해 침몰선'] },
+];
+
+export const NPCS = [
+  { id:'captain', name:'박씨', role:'횟집 주인', icon:'박', accent:'#f17f6d', greeting:'오늘 들어온 물건을 보니 바다가 말하고 있구먼.' },
+  { id:'mechanic', name:'유성', role:'배 수리공', icon:'유', accent:'#71b5d5', greeting:'윈치 소리를 들어보면 배 상태를 바로 알 수 있지.' },
+  { id:'merchant', name:'미나', role:'어시장 상인', icon:'미', accent:'#d991b7', greeting:'오늘 도시 시장이 원하는 어종부터 확인해 봐.' },
+];
+
+export const QUESTS = [
+  { id:'catch-crab', npcId:'captain', title:'게가 제철이라네', description:'게 종류를 4마리 가져다줘.', target:4, type:'tag', tag:'crab', rewardCoins:1800, rewardXp:36 },
+  { id:'perfect-pulls', npcId:'mechanic', title:'줄 감는 솜씨', description:'완벽한 회수를 8번 성공해봐.', target:8, type:'perfect', rewardCoins:1600, rewardXp:52 },
+  { id:'new-species', npcId:'merchant', title:'새 얼굴이 필요해', description:'처음 보는 생물 5종을 발견해줘.', target:5, type:'newSpecies', rewardCoins:2600, rewardXp:68 },
+  { id:'deploy-three', npcId:'mechanic', title:'트랩라인 연습', description:'통발을 3번 설치해봐.', target:3, type:'deploy', rewardCoins:2100, rewardXp:44 },
+  { id:'sell-city', npcId:'merchant', title:'도시 첫 출하', description:'도시 수산시장에 3건 출하해봐.', target:3, type:'citySale', rewardCoins:2800, rewardXp:58 },
+  { id:'large-record', npcId:'captain', title:'큰 놈 한 마리', description:'대형 이상 생물을 2마리 건져 올려봐.', target:2, type:'large', rewardCoins:3200, rewardXp:74 },
+];
+
+
+export function getDailyQuestIds(day = 1) {
+  const random = mulberry32(hashString(`daily-quests-${day}`));
+  const pool = [...QUESTS];
+  const picked = [];
+  while (pool.length && picked.length < 3) {
+    const index = Math.floor(random() * pool.length);
+    picked.push(pool.splice(index, 1)[0].id);
+  }
+  return picked;
+}
+
+export const STORY_STEPS = [
+  { id:'homecoming', title:'돌아온 배', description:'가족의 낡은 통발 배에 첫 미끼를 실었다.' },
+  { id:'first-deploy', title:'첫 트랩라인', description:'작은 방파제에 통발을 설치하자.' },
+  { id:'first-catch', title:'바다가 준 첫 몫', description:'준비된 통발을 회수해 첫 어획물을 얻자.' },
+  { id:'repair-winch', title:'끊긴 항로의 준비', description:'전동 윈치를 1단계 이상 강화하자.' },
+  { id:'second-slot', title:'두 개의 불빛', description:'통발 거치대를 강화해 두 번째 슬롯을 열자.' },
+  { id:'sunset-route', title:'노을 암초 조사', description:'노을 암초에서 한 번 회수에 성공하자.' },
+  { id:'legacy', title:'옛 통발 항로', description:'희귀 이상 생물을 발견해 오래된 항로를 되살리자.' },
+];
+
+export const WEATHER_TYPES = [
+  { id:'clear', label:'맑음', icon:'☀', currentModifier:.92, rarityModifier:.98 },
+  { id:'cloudy', label:'흐림', icon:'☁', currentModifier:1.02, rarityModifier:1.03 },
+  { id:'rain', label:'비', icon:'☂', currentModifier:1.16, rarityModifier:1.08 },
+  { id:'wind', label:'강풍', icon:'≋', currentModifier:1.32, rarityModifier:1.1 },
+  { id:'fog', label:'해무', icon:'⌇', currentModifier:1.08, rarityModifier:1.16 },
+];
+export const SEASONS = ['봄','여름','가을','겨울'];
+
+export const getById = (items, id) => items.find((item) => item.id === id);
+export const getSpecies = (id) => getById(SPECIES, id);
+export const getLocation = (id) => getById(LOCATIONS, id);
+export const getTrap = (id) => getById(TRAPS, id);
+export const getBait = (id) => getById(BAITS, id);
+export const getUpgrade = (id) => getById(BOAT_UPGRADES, id);
+
+export function judgeTiming(marker, zoneCenter, zoneWidth) {
+  const distance = Math.abs(marker - zoneCenter);
+  if (distance <= zoneWidth * .28) return 'perfect';
+  if (distance <= zoneWidth * .68) return 'good';
+  return 'miss';
+}
+
+export function judgePlacement(marker, targetCenter, targetWidth) {
+  const judgement = judgeTiming(marker, targetCenter, targetWidth);
+  return judgement === 'perfect' ? 'perfect' : judgement === 'good' ? 'stable' : 'unstable';
+}
+
+export function calculatePullOutcome({
+  judgement,
+  combo = 0,
+  pullPower = 1,
+  stability = 1,
+  current = 1,
+  dangerActive = false,
+  damageMitigation = 0,
+  stage = 'midwater',
+  random = Math.random,
+}) {
+  const mitigation = clamp(1 - damageMitigation, .55, 1);
+  if (dangerActive) {
+    return {
+      depthGain: 0,
+      tensionGain: (.3 + random() * .14) * mitigation,
+      durabilityLoss: Math.max(1, Math.round((4 + random() * 4) * mitigation)),
+      lockLoss: Math.max(3, Math.round((11 + random() * 9) * mitigation)),
+      scoreGain: 0,
+      comboDelta: -Math.max(1, combo),
+    };
+  }
+
+  const stageDepth = stage === 'seabed' ? .84 : stage === 'surface' ? .92 : 1;
+  const stageTension = stage === 'seabed' ? 1.16 : stage === 'surface' ? 1.13 : 1;
+  const instability = Math.max(0, current - stability);
+  const table = {
+    perfect: { depth:.56 + Math.min(combo, 8) * .028, tension:.03, durability:random() < .1 ? 1 : 0, lock:0, score:160 + combo * 20, combo:1 },
+    good: { depth:.34 + Math.min(combo, 5) * .014, tension:.068, durability:random() < .25 ? 1 : 0, lock:random() < .18 ? 1 : 0, score:84 + combo * 9, combo:1 },
+    miss: { depth:.08, tension:.145, durability:1 + (random() < .34 ? 1 : 0), lock:2 + Math.round(random() * 3), score:15, combo:-Math.max(1, combo) },
+  };
+  const row = table[judgement] ?? table.miss;
+  return {

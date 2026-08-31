@@ -1,11 +1,13 @@
 {
-  "name": "below-the-waves-trap-diary",
-  "version": "1.0.0",
+  "name": "moneygame1-trapline-v2",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
-    "check": "node --check game.js && node --test",
-    "serve": "python3 -m http.server 4173"
+    "build": "node scripts/build.mjs dist",
+    "assemble:test": "node scripts/build.mjs .generated",
+    "start": "node scripts/build.mjs .dev && python3 -m http.server 4180 --directory .dev",
+    "check": "npm run assemble:test && node --check .generated/game-core.js && node --check .generated/game.js && node --check .generated/service-worker.js",
+    "test": "npm run assemble:test && node --test tests/*.test.js"
   }
 }
