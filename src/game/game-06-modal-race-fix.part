@@ -1,0 +1,21 @@
+// Replace modal helpers after the UI module has loaded so a stale close timer
+// can never clear content belonging to a newer modal.
+showModal = function showModalSafe(content, className = '', dismissible = true) {
+  if (modalClearTimer) {
+    clearTimeout(modalClearTimer);
+    modalClearTimer = null;
+  }
+  modalDismissible = dismissible;
+  modalRoot.innerHTML = `<div class="modal-backdrop" ${dismissible ? 'data-action="close-modal"' : ''}></div><section class="modal-card ${className}" role="dialog" aria-modal="true">${dismissible ? `<button class="modal-close" data-action="close-modal" aria-label="닫기">${icon('close')}</button>` : ''}${content}</section>`;
+  modalRoot.classList.add('open');
+};
+
+closeModal = function closeModalSafe() {
+  if (!modalDismissible && runtime?.resolved === false) return;
+  modalRoot.classList.remove('open');
+  if (modalClearTimer) clearTimeout(modalClearTimer);
+  modalClearTimer = setTimeout(() => {
+    if (!modalRoot.classList.contains('open')) modalRoot.innerHTML = '';
+    modalClearTimer = null;
+  }, 180);
+};
