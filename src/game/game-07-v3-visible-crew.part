@@ -1,0 +1,156 @@
+// V3.1 visual hotfix: make the vessel and playable captain unmistakably visible.
+// This file intentionally patches V2 renderers after all core modules load, so
+// existing game data and mechanics remain unchanged.
+
+const v3CrewStyle = document.createElement('style');
+v3CrewStyle.dataset.feature = 'v3-visible-vessel-and-captain';
+v3CrewStyle.textContent = `
+/* V3.1 visible vessel and captain */
+.harbor-hero{min-height:440px;padding:8px 12px 22px;align-content:end;overflow:visible}
+.harbor-hero h1 em{font-size:.38em;font-style:normal;vertical-align:top;margin-left:5px;padding:4px 7px;border:1px solid rgba(139,224,195,.35);border-radius:9px;color:var(--accent);background:rgba(4,25,35,.72)}
+.harbor-cast{width:100%;margin:0 auto 2px;position:relative;z-index:2}
+.boat-crew-scene{position:relative;width:100%;max-width:460px;margin:0 auto;filter:drop-shadow(0 18px 22px rgba(0,0,0,.34));isolation:isolate}
+.boat-crew-scene svg{display:block;width:100%;height:auto;overflow:visible}
+.scene-boat-bob{transform-origin:230px 150px;animation:v3-boat-bob 3.2s ease-in-out infinite}
+.scene-waves{animation:v3-wave-drift 4s linear infinite alternate}
+.fisher-character{transform-origin:213px 137px;animation:v3-fisher-breathe 2.2s ease-in-out infinite}
+.trap-stack{filter:drop-shadow(0 4px 3px rgba(0,0,0,.28))}
+.crew-nameplate{position:absolute;left:14px;bottom:12px;display:grid;grid-template-columns:34px 1fr 7px;align-items:center;gap:8px;padding:7px 10px 7px 7px;border:1px solid rgba(255,255,255,.18);border-radius:15px;background:rgba(2,18,26,.82);box-shadow:0 8px 20px rgba(0,0,0,.28);backdrop-filter:blur(8px);text-align:left}
+.crew-nameplate .crew-avatar{width:34px;height:34px;border-radius:11px;background:linear-gradient(145deg,#f3d159,#e77855);color:#17313a;display:grid;place-items:center;font-size:15px;font-weight:1000;border:2px solid rgba(255,255,255,.24)}
+.crew-nameplate small{display:block;font-size:7px;letter-spacing:.14em;color:var(--accent)}
+.crew-nameplate b{display:block;font-size:11px;margin-top:2px;color:#fff7dc}
+.crew-nameplate i{width:7px;height:7px;border-radius:50%;background:#83e0bd;box-shadow:0 0 12px #83e0bd}
+.voyage-cast{position:relative;flex:0 0 auto;height:135px;margin:4px 0 5px;display:flex;justify-content:center;align-items:center;overflow:hidden;border-radius:20px;border:1px solid rgba(186,235,219,.15);background:linear-gradient(180deg,rgba(5,26,36,.16),rgba(5,26,36,.56));box-shadow:inset 0 -24px 45px rgba(1,15,22,.26)}
+.voyage-cast .boat-crew-scene{width:min(100%,360px);margin-top:13px}
+.voyage-cast .crew-nameplate{display:none}
+.voyage-cast .crew-callout{position:absolute;right:8px;bottom:8px;max-width:195px;padding:7px 10px;border-radius:13px 13px 3px 13px;background:rgba(4,22,31,.9);border:1px solid rgba(139,224,195,.28);box-shadow:0 8px 20px rgba(0,0,0,.3);text-align:left}
+.voyage-cast .crew-callout b{display:block;font-size:8px;color:var(--accent);margin-bottom:2px}
+.voyage-cast .crew-callout span{display:block;font-size:8px;line-height:1.35;color:#eaf5ef}
+.deploy-game .deploy-copy{margin-top:0;padding-bottom:8px}
+.deploy-game .deploy-copy h2{font-size:18px;margin-top:3px}
+.retrieve-game .stage-track{margin-top:1px;height:42px}
+.retrieve-game .event-banner{min-height:44px;margin-top:3px}
+.retrieve-game .game-readouts{margin-top:4px}
+.retrieve-game .pull-panel{padding:11px;margin-top:auto}
+.retrieve-game .hold-button{height:59px}
+@keyframes v3-boat-bob{0%,100%{transform:translateY(0) rotate(-.35deg)}50%{transform:translateY(4px) rotate(.35deg)}}
+@keyframes v3-wave-drift{from{transform:translateX(-4px)}to{transform:translateX(4px)}}
+@keyframes v3-fisher-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+@media(max-height:760px){.harbor-hero{min-height:390px}.voyage-cast{height:96px;margin:1px 0 3px}.voyage-cast .boat-crew-scene{width:295px;margin-top:18px}.voyage-cast .crew-callout{max-width:158px;padding:5px 7px}.voyage-cast .crew-callout span{font-size:7px}.deploy-game .deploy-copy h2{font-size:16px;margin-bottom:4px}.deploy-game .deploy-copy p{display:none}.retrieve-game .stage-track{height:36px}.retrieve-game .event-banner{min-height:38px}.retrieve-game .game-readouts>span{padding:6px 8px}.retrieve-game .pull-panel{padding:9px}.retrieve-game .hold-button{height:54px}}
+@media(max-width:370px){.harbor-hero{min-height:410px}.crew-nameplate{left:8px;bottom:8px}.voyage-cast .boat-crew-scene{width:330px}.voyage-cast .crew-callout{right:5px;bottom:5px}}
+`;
+document.head.appendChild(v3CrewStyle);
+
+function boatCrewSceneV3(variant = 'harbor') {
+  const compact = variant !== 'harbor';
+  const safeVariant = html(variant);
+  return `<div class="boat-crew-scene ${safeVariant}" aria-label="통발선과 선장 지호">
+    <svg viewBox="0 0 460 210" role="img" aria-label="노란 우비를 입은 어부 지호가 붉은 통발선 갑판에 서 있습니다" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="scene-sky-${safeVariant}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b2535"/><stop offset=".58" stop-color="#24546a"/><stop offset="1" stop-color="#d17a60"/></linearGradient>
+        <linearGradient id="scene-sea-${safeVariant}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b7b84"/><stop offset="1" stop-color="#08313e"/></linearGradient>
+        <linearGradient id="scene-hull-${safeVariant}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d6654f"/><stop offset="1" stop-color="#823b36"/></linearGradient>
+        <filter id="scene-glow-${safeVariant}"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <rect width="460" height="104" fill="url(#scene-sky-${safeVariant})" rx="22"/>
+      <rect y="104" width="460" height="106" fill="url(#scene-sea-${safeVariant})" rx="0 0 22 22"/>
+      <circle cx="365" cy="43" r="18" fill="#f4d27c" opacity=".92" filter="url(#scene-glow-${safeVariant})"/>
+      <path d="M0 104 66 79l47 25 70-14 74 14 68-23 65 23 70-15v29H0Z" fill="#102f3b" opacity=".92"/>
+      <g class="scene-waves" fill="none" stroke="#9de7d1" stroke-width="4" stroke-linecap="round" opacity=".62">
+        <path d="M8 135q20-12 40 0t40 0 40 0 40 0 40 0 40 0 40 0 40 0 40 0 40 0"/>
+        <path d="M-22 178q20-12 40 0t40 0 40 0 40 0 40 0 40 0 40 0 40 0 40 0 40 0" opacity=".5"/>
+      </g>
+      <g class="scene-boat-bob" shape-rendering="geometricPrecision">
+        <ellipse cx="230" cy="168" rx="153" ry="19" fill="#03151d" opacity=".4"/>
+        <path d="M78 129h310l-35 54H119Z" fill="url(#scene-hull-${safeVariant})" stroke="#391e23" stroke-width="7" stroke-linejoin="round"/>
+        <path d="M102 137h265l-12 17H111Z" fill="#f1c98f"/>
+        <path d="M129 181h221" stroke="#0a2632" stroke-width="9" stroke-linecap="round"/>
+        <rect x="242" y="78" width="88" height="55" rx="7" fill="#e8d7b4" stroke="#452f2c" stroke-width="6"/>
+        <rect x="253" y="88" width="27" height="22" rx="3" fill="#0d3544"/>
+        <rect x="288" y="88" width="27" height="22" rx="3" fill="#0d3544"/>
+        <rect x="271" y="61" width="8" height="20" rx="3" fill="#503932"/>
+        <path d="M275 62v-31" stroke="#d0a35e" stroke-width="7" stroke-linecap="round"/>
+        <path d="M279 36h42l-12 15h-30Z" fill="#ef7b5d"/>
+        <circle cx="341" cy="148" r="15" fill="#f4ead2" stroke="#e86652" stroke-width="7"/>
+        <g class="trap-stack" stroke="#88d8bf" stroke-width="3" fill="#0a2632">
+          <rect x="143" y="104" width="42" height="31" rx="4"/><path d="M153 105v29m11-29v29m11-29v29M144 115h40m-40 10h40"/>
+          <rect x="181" y="110" width="42" height="31" rx="4"/><path d="M191 111v29m11-29v29m11-29v29M182 121h40m-40 10h40"/>
+        </g>
+        <g class="fisher-character">
+          <ellipse cx="213" cy="137" rx="24" ry="7" fill="#071b24" opacity=".42"/>
+          <path d="M195 100q18-17 36 0v37h-36Z" fill="#f1c94f" stroke="#493b26" stroke-width="5" stroke-linejoin="round"/>
+          <path d="M196 111 178 128" stroke="#f1c94f" stroke-width="12" stroke-linecap="round"/>
+          <path d="M229 111 246 126" stroke="#f1c94f" stroke-width="12" stroke-linecap="round"/>
+          <path d="M201 135v17m24-17v17" stroke="#17313c" stroke-width="10" stroke-linecap="round"/>
+          <circle cx="213" cy="80" r="20" fill="#edbd91" stroke="#493128" stroke-width="5"/>
+          <path d="M192 77q4-24 22-24 18 1 22 24Z" fill="#d45c4e" stroke="#493128" stroke-width="5"/>
+          <rect x="190" y="73" width="47" height="9" rx="5" fill="#b94841"/>
+          <circle cx="206" cy="82" r="2.4" fill="#372823"/><circle cx="220" cy="82" r="2.4" fill="#372823"/>
+          <path d="M208 92q6 5 12 0" fill="none" stroke="#9f5a4d" stroke-width="3" stroke-linecap="round"/>
+          <path d="M207 105h12" stroke="#fff0a7" stroke-width="4" stroke-linecap="round"/>
+        </g>
+        <g class="winch-unit">
+          <rect x="87" y="107" width="43" height="30" rx="6" fill="#274956" stroke="#0b222c" stroke-width="5"/>
+          <circle cx="109" cy="118" r="13" fill="#0b2631" stroke="#d0a35e" stroke-width="5"/>
+          <path d="M109 118h27" stroke="#d0a35e" stroke-width="5" stroke-linecap="round"/>
+        </g>
+        <path d="M134 153q98 20 188 0" stroke="#f4d27c" stroke-width="3" opacity=".5"/>
+      </g>
+    </svg>
+    <div class="crew-nameplate"><span class="crew-avatar">지</span><div><small>${compact ? 'ON DECK' : 'YOUR CAPTAIN'}</small><b>선장 지호</b></div><i></i></div>
+  </div>`;
+}
+
+const drawBoatV2 = OceanRenderer.prototype.drawBoat;
+OceanRenderer.prototype.drawBoat = function drawBoatWithCaptainV3(x, y, scale, phase) {
+  drawBoatV2.call(this, x, y, scale, phase);
+  const c = this.ctx;
+  c.save();
+  c.translate(x - 43 * scale, y - 23 * scale + Math.sin(phase) * 3);
+  c.scale(scale, scale);
+  c.fillStyle = 'rgba(2,15,21,.35)'; c.beginPath(); c.ellipse(0, 30, 17, 5, 0, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = '#493426'; c.lineWidth = 3.2; c.fillStyle = '#f1c94f'; this.roundedRect(-14, 0, 28, 34, 5); c.fill(); c.stroke();
+  c.strokeStyle = '#f1c94f'; c.lineWidth = 7; c.lineCap = 'round'; c.beginPath(); c.moveTo(-10, 9); c.lineTo(-22, 20); c.moveTo(10, 9); c.lineTo(22, 18); c.stroke();
+  c.strokeStyle = '#17313c'; c.lineWidth = 7; c.beginPath(); c.moveTo(-8, 33); c.lineTo(-8, 44); c.moveTo(8, 33); c.lineTo(9, 44); c.stroke();
+  c.fillStyle = '#edbd91'; c.strokeStyle = '#493128'; c.lineWidth = 3.2; c.beginPath(); c.arc(0, -9, 14, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = '#d45c4e'; c.beginPath(); c.arc(0, -14, 15, Math.PI, Math.PI * 2); c.fill(); c.fillRect(-16, -15, 32, 6);
+  c.fillStyle = '#332522'; c.fillRect(-5, -10, 2.5, 2.5); c.fillRect(4, -10, 2.5, 2.5);
+  c.restore();
+};
+
+const renderHarborV2 = renderHarbor;
+renderHarbor = function renderHarborV3() {
+  renderHarborV2();
+  const hero = $('.harbor-hero');
+  if (!hero || hero.querySelector('.harbor-cast')) return;
+  hero.insertAdjacentHTML('afterbegin', `<div class="harbor-cast">${boatCrewSceneV3('harbor')}</div>`);
+  const kicker = hero.querySelector('.kicker');
+  const title = hero.querySelector('h1');
+  const description = hero.querySelector(':scope > p');
+  if (kicker) kicker.textContent = 'LIVING ISLAND V3';
+  if (title) title.innerHTML = '파도 아래 <em>V3</em>';
+  if (description) description.textContent = '선장 지호와 통발선을 키우며, 살아 움직이는 바다를 건져 올리세요.';
+};
+
+const startPlacementV2 = startPlacement;
+startPlacement = function startPlacementV3() {
+  startPlacementV2();
+  if (currentView !== 'deploy' || runtime?.type !== 'deploy') return;
+  const header = $('.deploy-game .game-header');
+  if (!header || $('.deploy-game .voyage-cast')) return;
+  header.insertAdjacentHTML('afterend', `<div class="voyage-cast deploy-cast">${boatCrewSceneV3('deploy')}<div class="crew-callout"><b>지호</b><span>해저 지형을 보면서 설치 지점을 잡자.</span></div></div>`);
+};
+
+const startRetrievalV2 = startRetrieval;
+startRetrieval = function startRetrievalV3(activeId, skipTutorial = false) {
+  startRetrievalV2(activeId, skipTutorial);
+  if (currentView !== 'retrieve' || runtime?.type !== 'retrieve') return;
+  const header = $('.retrieve-game .game-header');
+  if (!header || $('.retrieve-game .voyage-cast')) return;
+  header.insertAdjacentHTML('afterend', `<div class="voyage-cast retrieval-cast">${boatCrewSceneV3('retrieve')}<div class="crew-callout"><b>지호</b><span data-crew-line>통발이 무겁다. 장력을 보며 천천히 감자!</span></div></div>`);
+};
+
+document.title = '파도 아래 V3: 살아있는 섬';
+const metaDescription = document.querySelector('meta[name="description"]');
+if (metaDescription) metaDescription.content = '배와 어부 캐릭터가 살아 움직이는 통발 낚시 모바일 웹게임';
+if (currentView === 'harbor') renderHarbor();
